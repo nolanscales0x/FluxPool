@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 
 import {console} from "forge-std/console.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
@@ -9,105 +10,75 @@ import {LPFeeLibrary} from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
-import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
-import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {WETH} from "solmate/src/tokens/WETH.sol";
 
 import {FluxShell} from "../../src/shell/FluxShell.sol";
 import {FluxRevenueRouter} from "../../src/revenue/FluxRevenueRouter.sol";
 import {AgentRegistry} from "../../src/agents/AgentRegistry.sol";
 import {ChangeRegistry} from "../../src/gates/ChangeRegistry.sol";
+import {FluxProtectedToken} from "../../src/protection/FluxProtectedToken.sol";
+import {FluxFeeVault} from "../../src/protection/FluxFeeVault.sol";
 import {FluxPlanner} from "../../script/FluxPlanner.sol";
+import {MockUniversalRouter, MockUsdFeed} from "../protection/ProtectedLaunch.t.sol";
 
-/// @notice Rehearses the whole launch plan: every step sent by the controller at its pinned nonce,
-/// every address checked against the prediction, then the launched pool used for real. The pool
-/// pairs the token with native ETH (as on Ethereum) or with WETH; the concrete suites below cover
-/// native ETH and both WETH sort orders.
-abstract contract LaunchPlanTestBase is Deployers, FluxPlanner {
+/// @notice Rehearses the protected launch plan end to end on (simulated) chain 1: every step sent by the
+/// controller at its pinned nonce, every address checked against the prediction, then the launched pool
+/// traded through the canonical router, its fees custodied by the vaults and swept by the revenue router.
+contract LaunchPlanTest is Deployers, FluxPlanner {
     using PoolIdLibrary for PoolKey;
+
+    address constant CANONICAL_ROUTER = 0xd92A36B0000531EF3063dEd4De20A0783308446C;
+    address constant CANONICAL_FEED = 0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419;
+    address constant PLATFORM = 0xD88539d3c4C460136a733A3Fd60cf6BF269079da;
 
     Config c;
     Addresses a;
     Step[] steps;
     PoolKey launchKey;
     address trader = makeAddr("trader");
-    WETH weth; // unset for a native ETH quote
-    address quote;
-
-    /// @dev The pool's quote: address(0) for native ETH, otherwise where to put a WETH.
-    function _quoteAddress() internal pure virtual returns (address);
 
     function setUp() public {
+        vm.chainId(1);
+        vm.warp(1_800_000_000);
         deployFreshManagerAndRouters();
-        quote = _quoteAddress();
-        if (quote != address(0)) {
-            deployCodeTo("WETH.sol:WETH", quote);
-            weth = WETH(payable(quote));
-        }
-        c = Config({
-            controller: makeAddr("controller"),
-            startNonce: 0,
-            poolManager: address(manager),
-            quote: quote,
-            treasury: makeAddr("treasury-placeholder"),
-            safe: makeAddr("safe-placeholder"),
-            operator: makeAddr("operator-placeholder"),
-            attesterManager: makeAddr("attester-manager-placeholder"),
-            buyRecipient: makeAddr("launch-wallet"),
-            name: "FluxPool Test",
-            symbol: "FLUXTEST",
-            supply: 1_000_000_000 ether,
-            liquidityQuote: 10 ether,
-            liquidityTokens: 100_000_000 ether,
-            initialBuyQuote: 0.01 ether,
-            minTokensOut: 1,
-            launchWindow: 300,
-            baseFee: 32_000,
-            feeCap: 40_000,
-            launchFeeCap: 50_000,
-            openingFee: 18_000,
-            creatorShareBps: 8_000,
-            timelockDelay: 48 hours,
-            launchMode: 0,
-            mcLow: 50 ether,
-            mcHigh: 5_000 ether,
-            dropWindowBlocks: 40,
-            dropHoldBlocks: 10,
-            dropTicks: 2_877
-        });
+        vm.etch(CANONICAL_ROUTER, address(new MockUniversalRouter(manager)).code);
+        vm.etch(CANONICAL_FEED, address(new MockUsdFeed()).code);
+        MockUsdFeed(CANONICAL_FEED).set(3_000e8, block.timestamp);
+
+        c.controller = makeAddr("controller");
+        c.startNonce = 0;
+        c.poolManager = address(manager);
+        c.treasury = makeAddr("treasury-placeholder");
+        c.safe = makeAddr("safe-placeholder");
+        c.operator = makeAddr("operator-placeholder");
+        c.attesterManager = makeAddr("attester-manager-placeholder");
+        c.developer = makeAddr("developer-placeholder");
+        c.router = CANONICAL_ROUTER;
+        c.routerCodeHash = CANONICAL_ROUTER.codehash;
+        c.usdFeed = CANONICAL_FEED;
+        c.usdFeedCodeHash = CANONICAL_FEED.codehash;
+        c.name = "FluxPool Test";
+        c.symbol = "FLUXTEST";
+        c.supply = 1_000_000_000 ether;
+        c.startTick = 180_000; // ~15.2 ETH FDV, ~$45.7k at $3,000
+        c.initialBuyEth = 0.01 ether;
+        c.minTokensOut = 1;
+        c.creatorBuyFeeBps = 100;
+        c.creatorSellFeeBps = 100;
+        c.timelockDelay = 48 hours;
+        c.launchMode = 0;
+        c.mcLow = 10 ether;
+        c.mcHigh = 1_000 ether;
+        c.dropWindowBlocks = 40;
+        c.dropHoldBlocks = 10;
+        c.dropTicks = 2_877;
+
         Step[] memory s;
         (a, s) = _plan(c);
         for (uint256 i; i < s.length; i++) {
             steps.push(s[i]);
         }
-        bool tokenIs0 = a.token < quote;
-        Currency t = Currency.wrap(a.token);
-        Currency q = Currency.wrap(quote);
-        launchKey = PoolKey(tokenIs0 ? t : q, tokenIs0 ? q : t, LPFeeLibrary.DYNAMIC_FEE_FLAG, 60, IHooks(a.shell));
-    }
-
-    /// @dev zeroForOne for a buy: paying the quote for the token.
-    function _buyDir() internal view returns (bool) {
-        return Currency.unwrap(launchKey.currency0) == quote;
-    }
-
-    function _quoteBalance(address who) internal view returns (uint256) {
-        return quote == address(0) ? who.balance : weth.balanceOf(who);
-    }
-
-    function _buyAsTrader(uint256 quoteIn) internal {
-        bool dir = _buyDir();
-        vm.prank(trader);
-        swapRouter.swap{value: quote == address(0) ? quoteIn : 0}(
-            launchKey,
-            SwapParams({
-                zeroForOne: dir,
-                amountSpecified: -int256(quoteIn),
-                sqrtPriceLimitX96: dir ? MIN_PRICE_LIMIT : MAX_PRICE_LIMIT
-            }),
-            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
-            ZERO_BYTES
+        launchKey = PoolKey(
+            CurrencyLibrary.ADDRESS_ZERO, Currency.wrap(a.token), LPFeeLibrary.DYNAMIC_FEE_FLAG, 60, IHooks(a.shell)
         );
     }
 
@@ -119,80 +90,62 @@ abstract contract LaunchPlanTestBase is Deployers, FluxPlanner {
         }
     }
 
-    // ------------------------------------------------------------------
-    // The plan
-    // ------------------------------------------------------------------
-
     function test_everyStepLandsWherePredicted() public {
         _run(); // reverts on any address drift
-        Hooks.validateHookPermissions(IHooks(a.shell), FluxShell(payable(a.shell)).getHookPermissions());
         FluxShell shell = FluxShell(payable(a.shell));
+        Hooks.validateHookPermissions(IHooks(a.shell), shell.getHookPermissions());
         assertEq(shell.launcher(), a.launcher);
         assertEq(shell.creatorFeeBlock(), a.creatorFee);
         assertEq(shell.agentRegistry(), a.agentRegistry);
         assertEq(shell.protocolTreasury(), c.treasury);
+        assertEq(Currency.unwrap(shell.quote()), address(0), "native quote");
         assertEq(address(AgentRegistry(a.agentRegistry).changeRegistry()), a.changeRegistry);
         assertEq(address(ChangeRegistry(a.changeRegistry).agentRegistry()), a.agentRegistry);
-        assertEq(AgentRegistry(a.agentRegistry).playbookRegistry(), a.playbookRegistry);
+        assertEq(FluxProtectedToken(a.token).initializer(), a.launcher, "launcher is the token's initializer");
     }
 
-    function test_launchIsLiveAndChargedCorrectly() public {
+    function test_launchIsProtectedLockedAndLive() public {
         _run();
         FluxShell shell = FluxShell(payable(a.shell));
-        PoolId id = launchKey.toId();
-        FluxShell.PoolConfig memory cfg = shell.poolConfig(id);
-        assertTrue(cfg.initialized);
+        FluxShell.PoolConfig memory cfg = shell.poolConfig(launchKey.toId());
+        assertTrue(cfg.initialized && cfg.protectedLaunch, "protected and live");
+        assertEq(uint8(cfg.lockType), uint8(FluxShell.LockType.Locked), "locked");
         assertEq(cfg.creator, c.safe);
-        assertEq(cfg.creatorFeeRecipient, a.router);
-        assertEq(cfg.launchFeeCap, 50_000);
-
-        // Initial buy went to the launch wallet and paid Programmable's 0.30%.
-        assertGt(IERC20(a.token).balanceOf(c.buyRecipient), 0);
-        assertEq(shell.platformAccrued(), 0.00003 ether);
-        // The launcher holds nothing; the controller keeps the rest of the supply.
-        assertEq(IERC20(a.token).balanceOf(a.launcher), 0);
-        assertEq(a.launcher.balance, 0);
-        assertEq(_quoteBalance(a.launcher), 0);
-        assertEq(Currency.unwrap(shell.quote()), quote);
-        assertGe(IERC20(a.token).balanceOf(c.controller), c.supply - c.liquidityTokens);
-        (uint256 creatorBps,,) = shell.feeSplit(id);
-        assertEq(creatorBps, 8_000);
+        assertEq(cfg.protectionModule, a.module);
+        assertEq(cfg.normalFeeVault, a.normalVault);
+        assertEq(cfg.openingTaxVault, a.taxVault);
+        FluxProtectedToken token = FluxProtectedToken(a.token);
+        assertEq(token.startedAt(), block.timestamp, "protection started");
+        assertGt(token.balanceOf(c.developer), 0, "initial buy to the developer");
+        assertEq(token.balanceOf(a.launcher), 0, "launcher holds nothing");
+        // The developer's initial buy paid the normal fee (0.3% platform + 1% creator) into the vault.
+        FluxFeeVault normal = FluxFeeVault(a.normalVault);
+        assertEq(
+            normal.platformAccrued() + normal.creatorAccrued(),
+            Math.mulDiv(c.initialBuyEth, 13_000, 1e6, Math.Rounding.Ceil)
+        );
     }
 
-    function test_launchedPoolTradesAndBuysBack() public {
+    function test_launchedPoolTradesThroughTheCanonicalRouterAndPaysOut() public {
         _run();
-        vm.deal(trader, 100 ether);
-        if (quote != address(0)) {
-            vm.startPrank(trader);
-            weth.deposit{value: 10 ether}();
-            weth.approve(address(swapRouter), type(uint256).max);
-            vm.stopPrank();
-        }
-        _buyAsTrader(0.05 ether);
-
-        vm.warp(block.timestamp + c.launchWindow);
-        for (uint256 i; i < 5; i++) {
+        vm.warp(block.timestamp + 300);
+        vm.deal(trader, 10 ether);
+        for (uint256 i; i < 3; i++) {
             vm.roll(block.number + 1);
-            _buyAsTrader(0.05 ether);
+            vm.prank(trader);
+            MockUniversalRouter(CANONICAL_ROUTER).buy{value: 0.1 ether}(launchKey, 0.1 ether);
         }
-
         FluxRevenueRouter router = FluxRevenueRouter(payable(a.router));
-        assertGt(router.marketCapEth(), c.mcLow);
-        router.distribute();
-        uint256 funds = _quoteBalance(a.router);
-        assertGt(funds, 0);
-        assertGt(_quoteBalance(c.safe), 0);
-        vm.prank(c.operator);
-        router.buyback(funds, 1);
-        assertGt(IERC20(a.token).balanceOf(router.BURN()), 0);
+        uint256 safeBefore = c.safe.balance;
+        router.distribute(); // pulls the creator fee from the vault, then splits Safe / buyback
+        assertGt(c.safe.balance, safeBefore, "safe paid");
+        assertGt(a.router.balance, 0, "buyback funds held");
+        uint256 platformBefore = PLATFORM.balance;
+        FluxFeeVault(a.normalVault).claimPlatform();
+        assertGt(PLATFORM.balance, platformBefore, "platform paid its 0.3%");
     }
-
-    // ------------------------------------------------------------------
-    // Programmable's rules
-    // ------------------------------------------------------------------
 
     function test_aStrayControllerTransactionBreaksThePlan() public {
-        // Golden rule 1: one extra controller transaction shifts every later nonce.
         Step[] memory s = steps;
         for (uint256 i; i < s.length; i++) {
             s[i].nonce += 1;
@@ -209,28 +162,11 @@ abstract contract LaunchPlanTestBase is Deployers, FluxPlanner {
         _simulate(c, s);
     }
 
+    /// @dev Programmable's plan limits. Runtime sizes come from the via-IR build: `forge build --sizes`.
     function test_fitsProgrammableLimitsAndBudget() public {
         _run();
-        address[11] memory components = [
-            a.deployer,
-            a.creatorFee,
-            a.agentRegistry,
-            a.changeRegistry,
-            a.playbookRegistry,
-            a.coreImpl,
-            a.launcher,
-            a.shell,
-            a.antiSnipe,
-            a.adaptiveFee,
-            a.token
-        ];
-        for (uint256 i; i < components.length; i++) {
-            assertLe(components[i].code.length, 24_576, "runtime over Programmable's limit");
-        }
-        assertLe(a.router.code.length, 24_576);
-        assertLe(components.length + 1, 16, "too many components");
         assertLe(steps.length, 64, "too many actions");
-
+        assertLe(steps.length - 1, 16, "too many components"); // every step but the launch deploys one
         uint256 total;
         for (uint256 i; i < steps.length; i++) {
             if (steps[i].to == address(0)) assertLe(steps[i].data.length, 49_152, "initcode over limit");
@@ -251,26 +187,5 @@ abstract contract LaunchPlanTestBase is Deployers, FluxPlanner {
         assertTrue(shifted.token != a.token);
         assertTrue(shifted.shell != a.shell);
         assertEq(uint160(shifted.shell) & Hooks.ALL_HOOK_MASK, SHELL_FLAGS);
-    }
-}
-
-/// @dev Native ETH, as we launch on Ethereum: the token is always currency1.
-contract LaunchPlanNativeTest is LaunchPlanTestBase {
-    function _quoteAddress() internal pure override returns (address) {
-        return address(0);
-    }
-}
-
-/// @dev WETH at a very low address: the token sorts as currency1.
-contract LaunchPlanTest is LaunchPlanTestBase {
-    function _quoteAddress() internal pure override returns (address) {
-        return address(0x0000000000000000000000000000000000001111);
-    }
-}
-
-/// @dev WETH at a very high address: the token sorts as currency0.
-contract LaunchPlanTokenFirstTest is LaunchPlanTestBase {
-    function _quoteAddress() internal pure override returns (address) {
-        return address(uint160(type(uint160).max) - 0xFFFF);
     }
 }

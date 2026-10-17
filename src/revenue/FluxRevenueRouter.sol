@@ -30,6 +30,10 @@ interface IFluxShellRevenue {
     function observe(PoolId id, uint256 blocksAgo) external view returns (Observation memory);
 }
 
+interface IFeeVaultCreator {
+    function claimCreator() external returns (uint256);
+}
+
 /// @title FluxRevenueRouter
 /// @notice Receives the creator fee share of FluxPool's own token pool and splits the pool's fees
 /// between the team Safe and buybacks:
@@ -61,6 +65,10 @@ contract FluxRevenueRouter is IUnlockCallback {
         uint32 dropWindowBlocks;
         uint32 dropHoldBlocks;
         int24 dropTicks;
+        /// The normal-fee vault of a protected pool (zero otherwise). A protected pool's LP fee is zero, so
+        /// its income is the creator fee that vault custodies; this router is that vault's creator
+        /// recipient, and everything it receives from the vault is the pool's creator income in full.
+        address normalFeeVault;
     }
 
     uint256 public constant MIN_BUYBACK_BPS = 500;
@@ -84,6 +92,8 @@ contract FluxRevenueRouter is IUnlockCallback {
     uint32 public immutable dropHoldBlocks;
     int24 public immutable dropTicks;
     PoolId public immutable poolId;
+    /// @notice The normal-fee vault of a protected pool, or zero.
+    address public immutable normalFeeVault;
 
     event Distributed(
         uint256 ethIn,
@@ -124,6 +134,7 @@ contract FluxRevenueRouter is IUnlockCallback {
         dropHoldBlocks = c.dropHoldBlocks;
         dropTicks = c.dropTicks;
         poolId = poolKey().toId();
+        normalFeeVault = c.normalFeeVault;
     }
 
     // ---------------------------------------------------------------------
@@ -134,13 +145,20 @@ contract FluxRevenueRouter is IUnlockCallback {
     function distribute() external {
         uint256 quoteBefore = quote.balanceOfSelf();
         uint256 tokBefore = token.balanceOf(address(this));
-        shell.collect(poolKey());
-        shell.claim(quote);
-        shell.claim(Currency.wrap(address(token)));
+        uint256 creatorBps;
+        if (normalFeeVault != address(0)) {
+            // Protected pool: the creator fee arrives from its vault, which pays only this contract.
+            try IFeeVaultCreator(normalFeeVault).claimCreator() {} catch {}
+            creatorBps = BPS; // what arrives is the whole of the pool's creator income
+        } else {
+            shell.collect(poolKey());
+            shell.claim(quote);
+            shell.claim(Currency.wrap(address(token)));
+            (creatorBps,,) = shell.feeSplit(poolId);
+        }
         uint256 quoteIn = quote.balanceOfSelf() - quoteBefore;
         uint256 tokIn = token.balanceOf(address(this)) - tokBefore;
 
-        (uint256 creatorBps,,) = shell.feeSplit(poolId);
         uint256 bps = buybackBps();
         uint256 quoteBuyback = _share(quoteIn, bps, creatorBps);
         uint256 tokBurn = _share(tokIn, bps, creatorBps);

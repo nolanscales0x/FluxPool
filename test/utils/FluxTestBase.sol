@@ -256,7 +256,13 @@ abstract contract FluxTestBase is Test, Deployers {
                 timelockDelay: 48 hours,
                 lockType: FluxShell.LockType.Locked,
                 unlockAt: 0,
-                launchMode: launchMode
+                launchMode: launchMode,
+                protectedLaunch: false,
+                protectionModule: address(0),
+                normalFeeVault: address(0),
+                openingTaxVault: address(0),
+                normalBuyFeeBps: 0,
+                normalSellFeeBps: 0
             })
         );
         manager.initialize(poolKey, SQRT_PRICE_1_1);

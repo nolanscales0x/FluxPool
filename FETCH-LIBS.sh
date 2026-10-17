@@ -33,4 +33,4 @@ fetch v4-core                 https://github.com/Uniswap/v4-core                
 fetch v4-periphery            https://github.com/Uniswap/v4-periphery                7ebd04b161745b75ed0c24ba2df3bc7c25f65606
 
 echo
-echo "done. next:  forge test --match-contract ReviewDemo -vv"
+echo "done. next:  FOUNDRY_PROFILE=test forge test --match-contract 'ProtectedLaunchTest|ReviewDemo' -vv"

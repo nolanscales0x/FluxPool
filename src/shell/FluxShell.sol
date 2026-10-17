@@ -23,6 +23,8 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 import {IFluxCore} from "../core/IFluxCore.sol";
+import {FluxFeeVault} from "../protection/FluxFeeVault.sol";
+import {FluxLaunchProtectionModule} from "../protection/FluxLaunchProtectionModule.sol";
 
 /// @title FluxShell
 /// @notice The single, immutable Uniswap v4 hook shared by every FluxPool pool. It forwards each
@@ -82,9 +84,24 @@ contract FluxShell is BaseHook, IUnlockCallback {
     bytes32 public constant FEE_PROFILE =
         keccak256("programmable.robinhood-quote-fee.gross-quote.ceil-per-trade.fluxpool-shell.v2");
 
+    /// @notice The policy's opening-fee decay, in whole seconds. A protected pool's module must agree
+    /// with this number (`stagePool` refuses one that does not), and for that long the schedule owns the
+    /// buy fee: buys are pinned to the pool's declared normal rate so the total is exactly the schedule's
+    /// and no block, mode, agent or queued change can move it. After it, the pool's own fee applies again.
+    uint256 public constant PROTECTION_DECAY_SECONDS = 30;
+    /// @notice Parts per million, the unit the opening tax is expressed in.
+    uint256 internal constant PPM = 1_000_000;
+    /// @notice Ceiling on a protected pool's creator buy or sell rate, in bps (the reference's).
+    uint256 public constant MAX_CREATOR_FEE_BPS = 1_000;
+
     // Transient slots for the swap in progress.
     bytes32 internal constant SWAP_ACTIVE_SLOT = keccak256("fluxpool.shell.swapActive");
     bytes32 internal constant EXPECTED_QUOTE_SLOT = keccak256("fluxpool.shell.expectedQuote");
+    /// @dev The authenticated buyer of the swap in progress, and the opening tax that buyer owes in ppm.
+    /// Both come from the pool's protection module in one call, in `_beforeSwap`, and the buyer is what
+    /// the budget is keyed to in `_afterSwap`.
+    bytes32 internal constant PROTECTED_BUYER_SLOT = keccak256("fluxpool.shell.protectedBuyer");
+    bytes32 internal constant OPENING_TAX_PPM_SLOT = keccak256("fluxpool.shell.openingTaxPpm");
 
     // ---------------------------------------------------------------------
     // Types
@@ -111,6 +128,13 @@ contract FluxShell is BaseHook, IUnlockCallback {
         LockType lockType;
         uint64 unlockAt;
         uint8 launchMode; // freedom mode at launch: 0 Guarded, 1 Fast, 2 Wild
+        // -- The protection layer, all of it required together or none of it. See stagePool.
+        bool protectedLaunch; // true: this pool satisfies Programmable's launch-protection policy
+        address protectionModule; // FluxLaunchProtectionModule: the schedule, the exemptions, the buyer
+        address normalFeeVault; // FluxFeeVault: the platform's 30 bps and the creator's share
+        address openingTaxVault; // FluxFeeVault: every unit of the opening tax, to the platform alone
+        uint24 normalBuyFeeBps; // creator buy fee in bps, taken on the gross quote leg (protected pools)
+        uint24 normalSellFeeBps; // creator sell fee in bps; a sell never pays the opening tax
     }
 
     struct PoolConfig {
@@ -127,6 +151,12 @@ contract FluxShell is BaseHook, IUnlockCallback {
         LockType lockType;
         uint64 unlockAt;
         uint8 launchMode; // freedom mode at launch: 0 Guarded, 1 Fast, 2 Wild
+        bool protectedLaunch;
+        address protectionModule;
+        address normalFeeVault;
+        address openingTaxVault;
+        uint24 normalBuyFeeBps;
+        uint24 normalSellFeeBps;
         bool tokenIsCurrency0;
         uint160 initSqrtPriceX96;
         bool staged;
@@ -146,6 +176,14 @@ contract FluxShell is BaseHook, IUnlockCallback {
         uint32 blockNumber;
         uint32 timestamp;
         int24 tick;
+    }
+
+    /// @dev The fees on one quote leg (see `_quoteFees`).
+    struct Fees {
+        uint256 gross;
+        uint256 platform;
+        uint256 creator;
+        uint256 tax;
     }
 
     enum Action {
@@ -186,6 +224,9 @@ contract FluxShell is BaseHook, IUnlockCallback {
     mapping(PoolId => Observation[OBSERVATIONS]) internal _observations;
     /// @notice Total observations ever written per pool; the latest is at (count - 1) % OBSERVATIONS.
     mapping(PoolId => uint256) public observationCount;
+    /// @notice A protected pool's buyer budget: tokens an authenticated buyer has been given inside the
+    /// protection window. Only ever increments. Public through `boughtDuringProtection`.
+    mapping(PoolId => mapping(address buyer => uint256)) internal _bought;
 
     // ---------------------------------------------------------------------
     // Events and errors
@@ -199,6 +240,12 @@ contract FluxShell is BaseHook, IUnlockCallback {
     );
     event FeesClaimed(address indexed account, Currency indexed currency, uint256 amount);
     event PlatformFeeAccrued(PoolId indexed pool, bool isBuy, uint256 grossQuote, uint256 platformFee);
+    /// @notice The opening tax a protected pool charged on a buy inside its schedule, in the quote
+    /// currency. It is minted to the pool's opening-tax vault and is platform money in full; the
+    /// platform's own 30 bps keep their own event above.
+    event OpeningTaxAccrued(
+        PoolId indexed pool, address indexed sender, bool isBuy, uint256 grossQuote, uint256 openingTax
+    );
     event PlatformFeesClaimed(uint256 amount);
     event CoreCallFailed(PoolId indexed pool, bytes4 selector);
 
@@ -221,6 +268,9 @@ contract FluxShell is BaseHook, IUnlockCallback {
     error NoTrade();
     error PartialFillUnsupported(uint256 expected, uint256 actual);
     error NothingToClaim();
+    /// @notice A protected pool's buyer budget: cumulative authenticated buys inside the protection
+    /// window, capped at 2% of the launch supply. Never restored by a sell, a transfer or a burn.
+    error BuyerLimitExceeded(address buyer, uint256 attempted, uint256 limit);
 
     constructor(
         IPoolManager _poolManager,
@@ -285,7 +335,17 @@ contract FluxShell is BaseHook, IUnlockCallback {
                 || s.launchWindow > MAX_LAUNCH_WINDOW || s.timelockDelay < MIN_TIMELOCK_DELAY
                 || (s.lockType == LockType.TimeLocked && s.unlockAt <= block.timestamp)
                 || (s.lockType != LockType.TimeLocked && s.unlockAt != 0) || s.launchMode > 2
-        ) revert InvalidSetup();
+                // A pool is protected in full or not at all: half of the wiring is a misdeclaration, not a
+                // pool waiting to be finished.
+                || (!s.protectedLaunch
+                    && (s.protectionModule != address(0)
+                        || s.normalFeeVault != address(0)
+                        || s.openingTaxVault != address(0)
+                        || s.normalBuyFeeBps != 0
+                        || s.normalSellFeeBps != 0))
+        ) {
+            revert InvalidSetup();
+        }
 
         cfg.initSqrtPriceX96 = s.sqrtPriceX96;
         cfg.core = s.core;
@@ -301,7 +361,61 @@ contract FluxShell is BaseHook, IUnlockCallback {
         cfg.unlockAt = s.unlockAt;
         cfg.launchMode = s.launchMode;
         cfg.tokenIsCurrency0 = tokenIs0;
+        if (s.protectedLaunch) {
+            // Every value the policy fixes is checked against the module that will hold it, rather than
+            // trusted from the plan. A protected pool that does not meet the policy cannot be staged at
+            // all, which is what makes "the rules hold in every mode" a property of the deployment.
+            _checkProtection(s);
+        }
+        cfg.protectedLaunch = s.protectedLaunch;
+        cfg.protectionModule = s.protectionModule;
+        cfg.normalFeeVault = s.normalFeeVault;
+        cfg.openingTaxVault = s.openingTaxVault;
+        cfg.normalBuyFeeBps = s.normalBuyFeeBps;
+        cfg.normalSellFeeBps = s.normalSellFeeBps;
         cfg.staged = true;
+    }
+
+    /// @dev The protection layer, checked in full. Split out of `stagePool` so the refusals read as one
+    /// list: what the module must be, what it must say, and what the two vaults must be wired to.
+    function _checkProtection(PoolSetup calldata s) internal view {
+        // The policy supports chains 1 and 4663 only. The module refuses the others at construction too;
+        // this refuses the half-declared pool.
+        if (block.chainid != 1 && block.chainid != 4663) revert InvalidSetup();
+        // The reference protects native-quoted pools only; another quote needs its own verified variant.
+        if (Currency.unwrap(quote) != address(0)) revert InvalidSetup();
+        // No path may withdraw a protected pool's liquidity: `Locked` is the only lock, and it is also
+        // what makes the position's liquidity unable to decrease.
+        if (s.lockType != LockType.Locked) revert InvalidSetup();
+        if (s.protectionModule == address(0) || s.normalFeeVault == address(0) || s.openingTaxVault == address(0)) {
+            revert InvalidSetup();
+        }
+        if (
+            s.protectionModule.code.length == 0 || s.normalFeeVault.code.length == 0
+                || s.openingTaxVault.code.length == 0
+        ) {
+            revert InvalidSetup();
+        }
+        FluxLaunchProtectionModule module = FluxLaunchProtectionModule(s.protectionModule);
+        if (
+            module.shell() != address(this) || address(module.token()) != s.token
+                || module.normalBuyFeePpm() != (PLATFORM_FEE_BPS + uint256(s.normalBuyFeeBps)) * 100
+                || module.DECAY_SECONDS() != PROTECTION_DECAY_SECONDS
+        ) revert InvalidSetup();
+        // The creator's normal buy and sell rates, in bps, with the reference's 1000 bps ceiling.
+        if (s.normalBuyFeeBps > MAX_CREATOR_FEE_BPS || s.normalSellFeeBps > MAX_CREATOR_FEE_BPS) revert InvalidSetup();
+
+        FluxFeeVault normal = FluxFeeVault(s.normalFeeVault);
+        FluxFeeVault tax = FluxFeeVault(s.openingTaxVault);
+        if (
+            address(normal.poolManager()) != address(poolManager) || normal.kernel() != address(this)
+                || Currency.unwrap(normal.quote()) != Currency.unwrap(quote)
+                || normal.creatorRecipient()
+                    != (s.creatorFeeRecipient == address(0) ? s.creator : s.creatorFeeRecipient)
+                || address(tax.poolManager()) != address(poolManager) || tax.kernel() != address(this)
+                || Currency.unwrap(tax.quote()) != Currency.unwrap(quote)
+                || tax.creatorRecipient() != PLATFORM_RECIPIENT
+        ) revert InvalidSetup();
     }
 
     /// @notice Adds the pool's initial liquidity as a shell-held position. ERC-20 sides (WETH and the
@@ -493,37 +607,82 @@ contract FluxShell is BaseHook, IUnlockCallback {
         if (_tload(SWAP_ACTIVE_SLOT) != 0) revert ReentrantSwap();
         if (params.amountSpecified == 0) revert NoTrade();
         _tstore(SWAP_ACTIVE_SLOT, 1);
-        _observeStartOfBlock(key.toId());
+        PoolId id = key.toId();
+        _observeStartOfBlock(id);
         (bool ok, uint256 rawFee, uint256 rawAllow) = _callCore(
-            _configs[key.toId()].core,
+            _configs[id].core,
             CORE_GAS_BEFORE_SWAP,
             abi.encodeCall(IFluxCore.onBeforeSwap, (sender, key, params, hookData))
         );
-        uint24 fee = _resolveFee(key.toId(), params.zeroForOne, ok, rawFee, rawAllow);
-        return (this.beforeSwap.selector, _platformFeeBefore(key, params), fee | LPFeeLibrary.OVERRIDE_FEE_FLAG);
+        uint24 fee = _resolveFee(id, params.zeroForOne, ok, rawFee, rawAllow);
+        // A protected pool's buyer is authenticated once, here, for the whole swap: the budget in
+        // `_afterSwap` is keyed to that buyer and the opening tax is priced from that buyer's rate.
+        _authenticateBuyer(id, sender, params);
+        return (this.beforeSwap.selector, _feesBefore(sender, key, params), fee | LPFeeLibrary.OVERRIDE_FEE_FLAG);
     }
 
-    /// @dev When the swap specifies the quote amount (exact-in buy, exact-out sell), the platform fee
-    /// is taken from the specified side now, and the pool's quote leg must then fill exactly.
-    function _platformFeeBefore(PoolKey calldata key, SwapParams calldata params) internal returns (BeforeSwapDelta) {
-        bool quoteIs0 = !_configs[key.toId()].tokenIsCurrency0;
+    /// @dev Asks the pool's protection module who is buying and what that buyer owes. One call answers
+    /// both. The module returns nothing outside the protection window, and inside it refuses a buy that
+    /// did not come through the canonical Universal Router, reading the buyer from the router's own
+    /// `msgSender()` — Programmable's supported buyer path.
+    function _authenticateBuyer(PoolId id, address sender, SwapParams calldata params) internal {
+        PoolConfig storage cfg = _configs[id];
+        if (!cfg.protectedLaunch) return;
+        if (params.zeroForOne == cfg.tokenIsCurrency0) return; // a sell: never authenticated, never taxed
+        (address buyer, uint24 taxPpm) = FluxLaunchProtectionModule(cfg.protectionModule).buyerAndTaxPpm(sender);
+        if (buyer != address(0)) _tstore(PROTECTED_BUYER_SLOT, uint256(uint160(buyer)));
+        if (taxPpm != 0) _tstore(OPENING_TAX_PPM_SLOT, taxPpm);
+    }
+
+    /// @dev The fees on one quote leg, by Programmable's reference rule (`_quoteTradeFees` in
+    /// ProtectedNative30HookV1): one total rounded up on the gross leg; the normal fee rounded up on the
+    /// same gross; the platform's 30 bps rounded up and allocated first; the creator gets the rest of the
+    /// normal fee, and the opening tax is the rest of the total. On an unprotected pool the normal fee is
+    /// the platform's 30 bps alone and there is no tax, which is exactly `quotePlatformFee`.
+    function _quoteFees(PoolId id, uint256 amount, bool amountIsNet, bool isBuy) internal view returns (Fees memory f) {
+        PoolConfig storage cfg = _configs[id];
+        uint256 normalPpm = PLATFORM_FEE_BPS * 100;
+        uint256 taxPpm;
+        if (cfg.protectedLaunch) {
+            normalPpm += uint256(isBuy ? cfg.normalBuyFeeBps : cfg.normalSellFeeBps) * 100;
+            if (isBuy) taxPpm = _tload(OPENING_TAX_PPM_SLOT);
+        }
+        uint256 totalPpm = normalPpm + taxPpm;
+        f.gross = amountIsNet ? Math.mulDiv(amount, PPM, PPM - totalPpm, Math.Rounding.Ceil) : amount;
+        uint256 total = amountIsNet ? f.gross - amount : Math.mulDiv(f.gross, totalPpm, PPM, Math.Rounding.Ceil);
+        uint256 normal = Math.mulDiv(f.gross, normalPpm, PPM, Math.Rounding.Ceil);
+        f.platform = Math.mulDiv(f.gross, PLATFORM_FEE_BPS, FEE_DENOMINATOR, Math.Rounding.Ceil);
+        f.creator = normal - f.platform;
+        f.tax = total - normal;
+    }
+
+    /// @dev When the swap specifies the quote amount (exact-in buy, exact-out sell), every fee is taken
+    /// from the specified side now, and the pool's quote leg must then fill exactly.
+    function _feesBefore(address sender, PoolKey calldata key, SwapParams calldata params)
+        internal
+        returns (BeforeSwapDelta)
+    {
+        PoolId id = key.toId();
+        bool quoteIs0 = !_configs[id].tokenIsCurrency0;
         if (!_quoteIsSpecified(params, quoteIs0)) return BeforeSwapDeltaLibrary.ZERO_DELTA;
         uint256 quoteAmount = _abs(params.amountSpecified);
-        (uint256 gross, uint256 platformFee) = quotePlatformFee(quoteAmount, params.amountSpecified > 0);
-        uint256 expected = params.amountSpecified > 0 ? gross : quoteAmount - platformFee;
+        Fees memory f = _quoteFees(id, quoteAmount, params.amountSpecified > 0, params.zeroForOne == quoteIs0);
+        uint256 taken = f.platform + f.creator + f.tax;
+        uint256 expected = params.amountSpecified > 0 ? f.gross : quoteAmount - taken;
         if (expected == 0) revert NoTrade();
         _tstore(EXPECTED_QUOTE_SLOT, expected);
-        _accruePlatform(key, params.zeroForOne == quoteIs0, gross, platformFee);
-        return toBeforeSwapDelta(SafeCast.toInt128(SafeCast.toInt256(platformFee)), 0);
+        _accrueFees(sender, key, params.zeroForOne == quoteIs0, f);
+        return toBeforeSwapDelta(SafeCast.toInt128(SafeCast.toInt256(taken)), 0);
     }
 
-    /// @dev When the quote amount is unspecified (exact-in sell, exact-out buy), the platform fee is
-    /// taken from the quote leg after the swap. Returns the hook's delta in the unspecified currency.
-    function _platformFeeAfter(PoolKey calldata key, SwapParams calldata params, BalanceDelta delta)
+    /// @dev When the quote amount is unspecified (exact-in sell, exact-out buy), every fee is taken from
+    /// the quote leg after the swap. Returns the hook's delta in the unspecified currency.
+    function _feesAfter(address sender, PoolKey calldata key, SwapParams calldata params, BalanceDelta delta)
         internal
         returns (int128)
     {
-        bool quoteIs0 = !_configs[key.toId()].tokenIsCurrency0;
+        PoolId id = key.toId();
+        bool quoteIs0 = !_configs[id].tokenIsCurrency0;
         uint256 quoteAmount = _abs(int256(quoteIs0 ? delta.amount0() : delta.amount1()));
         if (quoteAmount == 0 || (quoteIs0 ? delta.amount1() : delta.amount0()) == 0) revert NoTrade();
         if (_quoteIsSpecified(params, quoteIs0)) {
@@ -531,10 +690,11 @@ contract FluxShell is BaseHook, IUnlockCallback {
             if (quoteAmount != expected) revert PartialFillUnsupported(expected, quoteAmount);
             return 0;
         }
-        (uint256 gross, uint256 platformFee) = quotePlatformFee(quoteAmount, params.amountSpecified > 0);
-        if (params.amountSpecified < 0 && platformFee >= quoteAmount) revert NoTrade();
-        _accruePlatform(key, params.zeroForOne == quoteIs0, gross, platformFee);
-        return SafeCast.toInt128(SafeCast.toInt256(platformFee));
+        Fees memory f = _quoteFees(id, quoteAmount, params.amountSpecified > 0, params.zeroForOne == quoteIs0);
+        uint256 taken = f.platform + f.creator + f.tax;
+        if (params.amountSpecified < 0 && taken >= quoteAmount) revert NoTrade();
+        _accrueFees(sender, key, params.zeroForOne == quoteIs0, f);
+        return SafeCast.toInt128(SafeCast.toInt256(taken));
     }
 
     /// @dev The specified currency is the input on exact-in swaps and the output on exact-out swaps.
@@ -543,33 +703,56 @@ contract FluxShell is BaseHook, IUnlockCallback {
         return specifiedIs0 == quoteIs0;
     }
 
-    /// @dev Mints the fee as quote claims to the shell (backed by the swap's own delta) and records it.
-    function _accruePlatform(PoolKey calldata key, bool isBuy, uint256 gross, uint256 platformFee) internal {
-        poolManager.mint(address(this), quote.toId(), platformFee);
-        platformAccrued += platformFee;
-        emit PlatformFeeAccrued(key.toId(), isBuy, gross, platformFee);
+    /// @dev Mints the fees as quote claims and records them. A protected pool custodies them the way the
+    /// reference's `_accrue` does: the platform's 30 bps and the creator's normal fee in the normal-fee
+    /// vault, the opening tax in the opening-tax vault (platform money in full), each vault checking its
+    /// ledger against the claims it holds. Every other pool keeps the shell's own platform accounting.
+    function _accrueFees(address sender, PoolKey calldata key, bool isBuy, Fees memory f) internal {
+        PoolId id = key.toId();
+        PoolConfig storage cfg = _configs[id];
+        if (cfg.protectedLaunch) {
+            uint256 normal = f.platform + f.creator;
+            if (normal != 0) {
+                poolManager.mint(cfg.normalFeeVault, quote.toId(), normal);
+                FluxFeeVault(cfg.normalFeeVault).recordFees(f.platform, f.creator);
+            }
+            if (f.tax != 0) {
+                poolManager.mint(cfg.openingTaxVault, quote.toId(), f.tax);
+                FluxFeeVault(cfg.openingTaxVault).recordFees(f.tax, 0);
+                emit OpeningTaxAccrued(id, sender, isBuy, f.gross, f.tax);
+            }
+        } else if (f.platform != 0) {
+            poolManager.mint(address(this), quote.toId(), f.platform);
+            platformAccrued += f.platform;
+        }
+        emit PlatformFeeAccrued(id, isBuy, f.gross, f.platform);
     }
 
-    /// @dev Turns the core's raw answer into the fee the pool charges, enforcing the cap and the
-    /// never-block-a-sell rule.
+    /// @dev Turns the core's raw answer into the LP fee the pool charges, enforcing the cap and the
+    /// never-block-a-sell rule. A protected pool's LP fee is always zero: every fee it charges is taken
+    /// by the shell on the gross quote leg, by the reference rule, so the combined fee is exactly the
+    /// policy's and no core, block, agent or queued change can move it. A block may still refuse a buy
+    /// outright, which is stricter than the policy rather than weaker.
     function _resolveFee(PoolId id, bool zeroForOne, bool ok, uint256 rawFee, uint256 rawAllow)
         internal
         returns (uint24 fee)
     {
         PoolConfig storage cfg = _configs[id];
         bool isSell = cfg.tokenIsCurrency0 == zeroForOne;
+        bool valid = ok && rawFee <= type(uint24).max && rawAllow <= 1;
+        if (valid && rawAllow == 0 && !isSell) revert TradeRejected();
+        if (!valid) emit CoreCallFailed(id, IFluxCore.onBeforeSwap.selector);
+        if (cfg.protectedLaunch) return 0;
+
         bool inLaunchWindow = block.timestamp < uint256(cfg.launchStart) + cfg.launchWindow;
         uint24 cap = inLaunchWindow ? cfg.launchFeeCap : cfg.feeCap;
-
-        if (ok && rawFee <= type(uint24).max && rawAllow <= 1) {
-            if (rawAllow == 0 && !isSell) revert TradeRejected();
+        if (valid) {
             fee = uint24(rawFee) > cap ? cap : uint24(rawFee);
         } else {
             // Core failed or answered out of range. Sells (and buys after launch) pay the base fee.
             // Buys inside the launch window pay the launch cap, so breaking the core can't be used
             // to skip anti-sniper protection.
             fee = (inLaunchWindow && !isSell) ? cap : cfg.baseFee;
-            emit CoreCallFailed(id, IFluxCore.onBeforeSwap.selector);
         }
     }
 
@@ -581,8 +764,9 @@ contract FluxShell is BaseHook, IUnlockCallback {
         bytes calldata hookData
     ) internal override returns (bytes4, int128) {
         if (_tload(SWAP_ACTIVE_SLOT) == 0) revert InvalidSwapContext();
-        int128 hookDelta = _platformFeeAfter(key, params, delta);
+        int128 hookDelta = _feesAfter(sender, key, params, delta);
         PoolId id = key.toId();
+        _checkBuyerBudget(id, delta);
         (bool ok,,) = _callCore(
             _configs[id].core,
             CORE_GAS_AFTER_SWAP,
@@ -590,8 +774,30 @@ contract FluxShell is BaseHook, IUnlockCallback {
         );
         if (!ok) emit CoreCallFailed(id, IFluxCore.onAfterSwap.selector);
         _tstore(EXPECTED_QUOTE_SLOT, 0);
+        _tstore(PROTECTED_BUYER_SLOT, 0);
+        _tstore(OPENING_TAX_PPM_SLOT, 0);
         _tstore(SWAP_ACTIVE_SLOT, 0);
         return (this.afterSwap.selector, hookDelta);
+    }
+
+    /// @dev The buyer budget: what an authenticated buyer has been given, in tokens, over the first 300
+    /// seconds. The token leg the swapper receives is what counts, so a sell never consumes the budget
+    /// and never restores it — a wallet's 2% is a total for the window, not a balance it can refill.
+    /// There are no exemptions: the developer and their six wallets are capped exactly like anyone else,
+    /// because the policy's exemption list covers the opening fee only.
+    function _checkBuyerBudget(PoolId id, BalanceDelta delta) internal {
+        if (!_configs[id].protectedLaunch) return;
+        uint256 raw = _tload(PROTECTED_BUYER_SLOT);
+        // No authenticated buyer means no buy inside the window: the module answers `(0, 0)` before
+        // trading opens and after the window closes, and a sell is never authenticated at all.
+        if (raw == 0) return;
+        int128 tokenLeg = _configs[id].tokenIsCurrency0 ? delta.amount0() : delta.amount1();
+        if (tokenLeg <= 0) return;
+        address buyer = address(uint160(raw));
+        uint256 limit = FluxLaunchProtectionModule(_configs[id].protectionModule).buyerTokenLimit();
+        uint256 bought = _bought[id][buyer] + uint256(uint128(tokenLeg));
+        if (bought > limit) revert BuyerLimitExceeded(buyer, bought, limit);
+        _bought[id][buyer] = bought;
     }
 
     // ---------------------------------------------------------------------
@@ -678,6 +884,48 @@ contract FluxShell is BaseHook, IUnlockCallback {
     function activeFeeCap(PoolId id) external view returns (uint24) {
         PoolConfig storage cfg = _configs[id];
         return block.timestamp < uint256(cfg.launchStart) + cfg.launchWindow ? cfg.launchFeeCap : cfg.feeCap;
+    }
+
+    /// @notice A pool's protection, as staged: the module, the two vaults and the declared normal rates.
+    /// `isProtected` is false and the addresses are zero for a pool that is not protected.
+    function protectionOf(PoolId id)
+        external
+        view
+        returns (
+            bool isProtected,
+            address module,
+            address normalFeeVault,
+            address openingTaxVault,
+            uint24 normalBuyFeeBps,
+            uint24 normalSellFeeBps
+        )
+    {
+        PoolConfig storage cfg = _configs[id];
+        return (
+            cfg.protectedLaunch,
+            cfg.protectionModule,
+            cfg.normalFeeVault,
+            cfg.openingTaxVault,
+            cfg.normalBuyFeeBps,
+            cfg.normalSellFeeBps
+        );
+    }
+
+    /// @notice What a wallet has bought inside a protected pool's window, in tokens, and the cap it is
+    /// measured against. The cap is the module's, so the two budgets are the same number by construction.
+    function boughtDuringProtection(PoolId id, address buyer) external view returns (uint256 bought, uint256 limit) {
+        bought = _bought[id][buyer];
+        if (_configs[id].protectedLaunch) {
+            limit = FluxLaunchProtectionModule(_configs[id].protectionModule).buyerTokenLimit();
+        }
+    }
+
+    /// @notice The opening tax on top of the normal fee right now, in ppm of the gross quote leg, for a
+    /// buyer: the schedule the module holds. Zero for a pool that is not protected, once thirty seconds
+    /// have passed, and for an exempt wallet.
+    function openingTaxPpm(PoolId id, address buyer) external view returns (uint256) {
+        if (!_configs[id].protectedLaunch) return 0;
+        return FluxLaunchProtectionModule(_configs[id].protectionModule).additionalTaxPpmForBuyer(buyer);
     }
 
     // ---------------------------------------------------------------------

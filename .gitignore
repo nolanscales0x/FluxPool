@@ -8,3 +8,4 @@ broadcast/
 .env.*
 !.env.example
 .DS_Store
+deploy/out/

@@ -5,12 +5,12 @@ libs = ["lib"]
 solc = "0.8.26"
 evm_version = "cancun"
 optimizer = true
-optimizer_runs = 800
-via_ir = false
-# Keep the CBOR metadata hash: Programmable requires Sourcify exact_match for every component,
-# which needs the metadata in the deployed bytecode.
-bytecode_hash = "ipfs"
-cbor_metadata = true
+optimizer_runs = 200
+via_ir = true
+# Programmable's launch-protection build settings: Solidity 0.8.26, via IR, optimizer 200, Cancun,
+# no CBOR metadata (packages/launch/contracts/launch-protection-v1/README.md, branch production).
+bytecode_hash = "none"
+cbor_metadata = false
 fs_permissions = [{ access = "read-write", path = "./" }]
 
 [fuzz]
@@ -23,7 +23,17 @@ runs = 128
 depth = 40
 fail_on_revert = false
 
+[profile.ci]
+via_ir = false
+optimizer_runs = 200
+
 [profile.ci.invariant]
 runs = 10000
 depth = 40
 fail_on_revert = false
+
+# Fast test profile: same logic, compiled without via IR (identical behaviour, much faster to build).
+# Deployed bytecode and the size limit come from the default profile above: `forge build --sizes`.
+[profile.test]
+via_ir = false
+optimizer_runs = 200

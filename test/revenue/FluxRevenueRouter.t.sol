@@ -54,7 +54,8 @@ abstract contract FluxRevenueRouterTestBase is FluxTestBase {
                 mcHigh: mcHigh,
                 dropWindowBlocks: 5,
                 dropHoldBlocks: 3,
-                dropTicks: 2_877 // ~25%
+                dropTicks: 2_877, // ~25%
+                normalFeeVault: address(0)
             })
         );
         return address(router);
@@ -229,7 +230,8 @@ abstract contract FluxRevenueRouterTestBase is FluxTestBase {
             mcHigh: 1 ether,
             dropWindowBlocks: 5,
             dropHoldBlocks: 3,
-            dropTicks: 2_877
+            dropTicks: 2_877,
+            normalFeeVault: address(0)
         });
         vm.expectRevert(FluxRevenueRouter.InvalidConfig.selector);
         new FluxRevenueRouter(c);
