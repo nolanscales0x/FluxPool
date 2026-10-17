@@ -1,0 +1,107 @@
+{
+  "id": "stolen-key-loosening",
+  "title": "Stolen agent key proposes loosening and a new block",
+  "description": "In a Guarded pool the attacker queues a fee loosening and a buy-blocking block. Neither applies early; ChangeQueued fires at once; the creator removes the agent and cancels the block.",
+  "start": {
+    "agentLevel": 3,
+    "afterSwap": [
+      "AdaptiveFee"
+    ],
+    "beforeSwap": [
+      "AntiSnipe",
+      "AdaptiveFee"
+    ],
+    "launchWindow": 0,
+    "mode": 0,
+    "playbook": 0
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "amount": 0,
+      "block": 0,
+      "expect": "ok",
+      "kind": "proposeSetting",
+      "seconds": 0,
+      "target": "AdaptiveFee.maxFee",
+      "value": 0
+    },
+    {
+      "actor": "anyone",
+      "amount": 0,
+      "block": 0,
+      "expect": "revert",
+      "kind": "execute",
+      "seconds": 0,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "agent",
+      "amount": 0,
+      "block": 1,
+      "expect": "ok",
+      "kind": "proposeBlock",
+      "seconds": 70,
+      "target": "Hostile:RejectAll",
+      "value": 0
+    },
+    {
+      "actor": "anyone",
+      "amount": 0,
+      "block": 1,
+      "expect": "revert",
+      "kind": "execute",
+      "seconds": 70,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "creator",
+      "amount": 0,
+      "block": 2,
+      "expect": "ok",
+      "kind": "removeAgent",
+      "seconds": 80,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "creator",
+      "amount": 0,
+      "block": 2,
+      "expect": "ok",
+      "kind": "cancel",
+      "seconds": 80,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "anyone",
+      "amount": 0,
+      "block": 3,
+      "expect": "revert",
+      "kind": "execute",
+      "seconds": 172860,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "holder",
+      "amount": 500,
+      "block": 4,
+      "expect": "ok",
+      "kind": "buy",
+      "seconds": 172870,
+      "target": "",
+      "value": 0
+    }
+  ],
+  "expect": {
+    "allSellsSucceed": true,
+    "feeNeverAboveCap": true,
+    "finalLaneLength": 2,
+    "finalMode": 255,
+    "maxSniperShareOfPoolBps": 0
+  }
+}

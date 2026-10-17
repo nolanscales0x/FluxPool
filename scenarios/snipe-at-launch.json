@@ -1,0 +1,247 @@
+{
+  "id": "snipe-at-launch",
+  "title": "Snipe at launch across many wallets",
+  "description": "Twenty sniper wallets buy in the first two blocks and a whale tries one large buy. The per-block cap (3 buys) and per-swap cap (1% of reserve) hold, the 90% opening fee applies, and snipers end up with a sliver of the pool.",
+  "start": {
+    "agentLevel": 0,
+    "afterSwap": [
+      "AdaptiveFee"
+    ],
+    "beforeSwap": [
+      "AntiSnipe",
+      "AdaptiveFee"
+    ],
+    "launchWindow": 60,
+    "mode": 0,
+    "playbook": 0
+  },
+  "steps": [
+    {
+      "actor": "sniper1",
+      "amount": 900,
+      "block": 0,
+      "expect": "ok",
+      "kind": "buy",
+      "seconds": 0,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "sniper2",
+      "amount": 900,
+      "block": 0,
+      "expect": "ok",
+      "kind": "buy",
+      "seconds": 0,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "sniper3",
+      "amount": 900,
+      "block": 0,
+      "expect": "ok",
+      "kind": "buy",
+      "seconds": 0,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "sniper4",
+      "amount": 900,
+      "block": 0,
+      "expect": "revert",
+      "kind": "buy",
+      "seconds": 0,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "sniper5",
+      "amount": 900,
+      "block": 0,
+      "expect": "revert",
+      "kind": "buy",
+      "seconds": 0,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "sniper6",
+      "amount": 900,
+      "block": 0,
+      "expect": "revert",
+      "kind": "buy",
+      "seconds": 0,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "sniper7",
+      "amount": 900,
+      "block": 0,
+      "expect": "revert",
+      "kind": "buy",
+      "seconds": 0,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "sniper8",
+      "amount": 900,
+      "block": 0,
+      "expect": "revert",
+      "kind": "buy",
+      "seconds": 0,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "sniper9",
+      "amount": 900,
+      "block": 0,
+      "expect": "revert",
+      "kind": "buy",
+      "seconds": 0,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "sniper10",
+      "amount": 900,
+      "block": 0,
+      "expect": "revert",
+      "kind": "buy",
+      "seconds": 0,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "sniper11",
+      "amount": 900,
+      "block": 1,
+      "expect": "ok",
+      "kind": "buy",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "sniper12",
+      "amount": 900,
+      "block": 1,
+      "expect": "ok",
+      "kind": "buy",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "sniper13",
+      "amount": 900,
+      "block": 1,
+      "expect": "ok",
+      "kind": "buy",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "sniper14",
+      "amount": 900,
+      "block": 1,
+      "expect": "revert",
+      "kind": "buy",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "sniper15",
+      "amount": 900,
+      "block": 1,
+      "expect": "revert",
+      "kind": "buy",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "sniper16",
+      "amount": 900,
+      "block": 1,
+      "expect": "revert",
+      "kind": "buy",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "sniper17",
+      "amount": 900,
+      "block": 1,
+      "expect": "revert",
+      "kind": "buy",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "sniper18",
+      "amount": 900,
+      "block": 1,
+      "expect": "revert",
+      "kind": "buy",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "sniper19",
+      "amount": 900,
+      "block": 1,
+      "expect": "revert",
+      "kind": "buy",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "sniper20",
+      "amount": 900,
+      "block": 1,
+      "expect": "revert",
+      "kind": "buy",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "sniperWhale",
+      "amount": 5000,
+      "block": 2,
+      "expect": "revert",
+      "kind": "buy",
+      "seconds": 4,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "holder",
+      "amount": 5000,
+      "block": 30,
+      "expect": "ok",
+      "kind": "buy",
+      "seconds": 61,
+      "target": "",
+      "value": 0
+    }
+  ],
+  "expect": {
+    "allSellsSucceed": true,
+    "feeNeverAboveCap": true,
+    "finalLaneLength": 255,
+    "finalMode": 255,
+    "maxSniperShareOfPoolBps": 200
+  }
+}

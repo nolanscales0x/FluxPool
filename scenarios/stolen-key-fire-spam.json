@@ -1,0 +1,117 @@
+{
+  "id": "stolen-key-fire-spam",
+  "title": "Stolen agent key fires playbooks repeatedly",
+  "description": "An attacker with the agent key fires the pool's playbook again and again. It can't re-fire while active, rate limits apply, and the creator's off switch stops it at once.",
+  "start": {
+    "agentLevel": 1,
+    "afterSwap": [
+      "AdaptiveFee"
+    ],
+    "beforeSwap": [
+      "AntiSnipe",
+      "AdaptiveFee"
+    ],
+    "launchWindow": 0,
+    "mode": 0,
+    "playbook": 1
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "amount": 0,
+      "block": 0,
+      "expect": "ok",
+      "kind": "fire",
+      "seconds": 0,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "agent",
+      "amount": 0,
+      "block": 1,
+      "expect": "revert",
+      "kind": "fire",
+      "seconds": 30,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "anyone",
+      "amount": 0,
+      "block": 2,
+      "expect": "ok",
+      "kind": "expire",
+      "seconds": 600,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "agent",
+      "amount": 0,
+      "block": 3,
+      "expect": "ok",
+      "kind": "fire",
+      "seconds": 601,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "anyone",
+      "amount": 0,
+      "block": 4,
+      "expect": "ok",
+      "kind": "expire",
+      "seconds": 1201,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "agent",
+      "amount": 0,
+      "block": 5,
+      "expect": "ok",
+      "kind": "fire",
+      "seconds": 1230,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "creator",
+      "amount": 0,
+      "block": 6,
+      "expect": "ok",
+      "kind": "removeAgent",
+      "seconds": 1300,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "anyone",
+      "amount": 0,
+      "block": 7,
+      "expect": "ok",
+      "kind": "expire",
+      "seconds": 1831,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "agent",
+      "amount": 0,
+      "block": 8,
+      "expect": "revert",
+      "kind": "fire",
+      "seconds": 1900,
+      "target": "",
+      "value": 0
+    }
+  ],
+  "expect": {
+    "allSellsSucceed": true,
+    "feeNeverAboveCap": true,
+    "finalLaneLength": 255,
+    "finalMode": 255,
+    "maxSniperShareOfPoolBps": 0
+  }
+}

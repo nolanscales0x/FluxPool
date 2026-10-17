@@ -1,0 +1,29 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+solc = "0.8.26"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 800
+via_ir = false
+# Keep the CBOR metadata hash: Programmable requires Sourcify exact_match for every component,
+# which needs the metadata in the deployed bytecode.
+bytecode_hash = "ipfs"
+cbor_metadata = true
+fs_permissions = [{ access = "read-write", path = "./" }]
+
+[fuzz]
+runs = 1024
+
+# Local default: quick invariant runs. CI uses FOUNDRY_PROFILE=ci for the guide's 10,000+
+# sequences per mode.
+[invariant]
+runs = 128
+depth = 40
+fail_on_revert = false
+
+[profile.ci.invariant]
+runs = 10000
+depth = 40
+fail_on_revert = false

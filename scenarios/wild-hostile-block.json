@@ -1,0 +1,77 @@
+{
+  "id": "wild-hostile-block",
+  "title": "Wild pool with hostile blocks",
+  "description": "In a Wild pool an agent instantly adds a block that pulls funds from the PoolManager mid-swap and one that burns all its gas. The sandbox skips both: trades go through and fees stay under the cap.",
+  "start": {
+    "agentLevel": 3,
+    "afterSwap": [
+      "AdaptiveFee"
+    ],
+    "beforeSwap": [
+      "AntiSnipe",
+      "AdaptiveFee"
+    ],
+    "launchWindow": 0,
+    "mode": 2,
+    "playbook": 0
+  },
+  "steps": [
+    {
+      "actor": "agent",
+      "amount": 0,
+      "block": 0,
+      "expect": "ok",
+      "kind": "proposeBlock",
+      "seconds": 0,
+      "target": "Hostile:TakeFunds",
+      "value": 0
+    },
+    {
+      "actor": "agent",
+      "amount": 0,
+      "block": 0,
+      "expect": "ok",
+      "kind": "proposeBlock",
+      "seconds": 60,
+      "target": "Hostile:BurnGas",
+      "value": 0
+    },
+    {
+      "actor": "holder",
+      "amount": 1000,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 62,
+      "target": "",
+      "value": 50000
+    },
+    {
+      "actor": "holder",
+      "amount": 500,
+      "block": 1,
+      "expect": "ok",
+      "kind": "buy",
+      "seconds": 62,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "holder",
+      "amount": 1000,
+      "block": 2,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 64,
+      "target": "",
+      "value": 50000
+    }
+  ],
+  "expect": {
+    "allSellsSucceed": true,
+    "feeNeverAboveCap": true,
+    "finalLaneLength": 4,
+    "finalMode": 255,
+    "maxSniperShareOfPoolBps": 0
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "id": "quiet-switch-to-wild",
+  "title": "Quiet switch to Wild",
+  "description": "A compromised creator key queues a switch from Guarded to Wild. It can't apply before the 48h timelock, the queue event is public from the first second, and cancelling stops it.",
+  "start": {
+    "agentLevel": 0,
+    "afterSwap": [
+      "AdaptiveFee"
+    ],
+    "beforeSwap": [
+      "AntiSnipe",
+      "AdaptiveFee"
+    ],
+    "launchWindow": 0,
+    "mode": 0,
+    "playbook": 0
+  },
+  "steps": [
+    {
+      "actor": "creator",
+      "amount": 0,
+      "block": 0,
+      "expect": "ok",
+      "kind": "setMode",
+      "seconds": 0,
+      "target": "",
+      "value": 2
+    },
+    {
+      "actor": "anyone",
+      "amount": 0,
+      "block": 1,
+      "expect": "revert",
+      "kind": "execute",
+      "seconds": 10,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "anyone",
+      "amount": 0,
+      "block": 2,
+      "expect": "revert",
+      "kind": "execute",
+      "seconds": 169200,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "creator",
+      "amount": 0,
+      "block": 3,
+      "expect": "ok",
+      "kind": "cancel",
+      "seconds": 169210,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "anyone",
+      "amount": 0,
+      "block": 4,
+      "expect": "revert",
+      "kind": "execute",
+      "seconds": 176400,
+      "target": "",
+      "value": 0
+    }
+  ],
+  "expect": {
+    "allSellsSucceed": true,
+    "feeNeverAboveCap": true,
+    "finalLaneLength": 255,
+    "finalMode": 0,
+    "maxSniperShareOfPoolBps": 0
+  }
+}

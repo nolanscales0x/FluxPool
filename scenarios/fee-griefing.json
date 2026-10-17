@@ -1,0 +1,657 @@
+{
+  "id": "fee-griefing",
+  "title": "Fee griefing with small trades",
+  "description": "An attacker spams tiny sells in one block, then keeps up small sells for twenty blocks, trying to push the adaptive sell fee up for everyone. Multi-block averaging keeps the holder's fee at the base fee.",
+  "start": {
+    "agentLevel": 0,
+    "afterSwap": [
+      "AdaptiveFee"
+    ],
+    "beforeSwap": [
+      "AntiSnipe",
+      "AdaptiveFee"
+    ],
+    "launchWindow": 0,
+    "mode": 0,
+    "playbook": 0
+  },
+  "steps": [
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "holder",
+      "amount": 1000,
+      "block": 2,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 4,
+      "target": "",
+      "value": 3000
+    },
+    {
+      "actor": "attacker",
+      "amount": 50,
+      "block": 3,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 6,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 50,
+      "block": 4,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 8,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 50,
+      "block": 5,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 10,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 50,
+      "block": 6,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 12,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 50,
+      "block": 7,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 14,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 50,
+      "block": 8,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 16,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 50,
+      "block": 9,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 18,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 50,
+      "block": 10,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 20,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 50,
+      "block": 11,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 22,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 50,
+      "block": 12,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 24,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 50,
+      "block": 13,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 26,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 50,
+      "block": 14,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 28,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 50,
+      "block": 15,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 30,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 50,
+      "block": 16,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 32,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 50,
+      "block": 17,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 34,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 50,
+      "block": 18,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 36,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 50,
+      "block": 19,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 38,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 50,
+      "block": 20,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 40,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 50,
+      "block": 21,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 42,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 50,
+      "block": 22,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 44,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 50,
+      "block": 23,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 46,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "holder",
+      "amount": 1000,
+      "block": 24,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 48,
+      "target": "",
+      "value": 3000
+    }
+  ],
+  "expect": {
+    "allSellsSucceed": true,
+    "feeNeverAboveCap": true,
+    "finalLaneLength": 255,
+    "finalMode": 255,
+    "maxSniperShareOfPoolBps": 0
+  }
+}

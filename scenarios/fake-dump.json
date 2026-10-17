@@ -1,0 +1,207 @@
+{
+  "id": "fake-dump",
+  "title": "Fake dump to trigger a playbook",
+  "description": "An attacker dumps and buys back inside one block, then dumps and holds for one block, trying to trick the agent into firing a triggered playbook. Start-of-block prices and the hold requirement resist both.",
+  "start": {
+    "agentLevel": 1,
+    "afterSwap": [
+      "AdaptiveFee"
+    ],
+    "beforeSwap": [
+      "AntiSnipe",
+      "AdaptiveFee"
+    ],
+    "launchWindow": 0,
+    "mode": 0,
+    "playbook": 2
+  },
+  "steps": [
+    {
+      "actor": "trader",
+      "amount": 1,
+      "block": 0,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 0,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "trader",
+      "amount": 1,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "trader",
+      "amount": 1,
+      "block": 2,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 4,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "trader",
+      "amount": 1,
+      "block": 3,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 6,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "trader",
+      "amount": 1,
+      "block": 4,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 8,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "trader",
+      "amount": 1,
+      "block": 5,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 10,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "trader",
+      "amount": 1,
+      "block": 6,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 12,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "trader",
+      "amount": 1,
+      "block": 7,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 14,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "trader",
+      "amount": 1,
+      "block": 8,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 16,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "trader",
+      "amount": 1,
+      "block": 9,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 18,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "trader",
+      "amount": 1,
+      "block": 10,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 20,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10000,
+      "block": 11,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 22,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 9000,
+      "block": 11,
+      "expect": "ok",
+      "kind": "buy",
+      "seconds": 22,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "trader",
+      "amount": 1,
+      "block": 12,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 24,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "agent",
+      "amount": 0,
+      "block": 12,
+      "expect": "revert",
+      "kind": "fire",
+      "seconds": 24,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attacker",
+      "amount": 10000,
+      "block": 13,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 26,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "trader",
+      "amount": 1,
+      "block": 14,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 28,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "agent",
+      "amount": 0,
+      "block": 14,
+      "expect": "revert",
+      "kind": "fire",
+      "seconds": 28,
+      "target": "",
+      "value": 0
+    }
+  ],
+  "expect": {
+    "allSellsSucceed": true,
+    "feeNeverAboveCap": true,
+    "finalLaneLength": 255,
+    "finalMode": 255,
+    "maxSniperShareOfPoolBps": 0
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "id": "missing-or-failed-check",
+  "title": "Block change with a missing or failed check",
+  "description": "A new block in a Fast pool can't activate with checks missing, and once the simulation check fails it never activates, even after the others pass and time goes by.",
+  "start": {
+    "agentLevel": 0,
+    "afterSwap": [
+      "AdaptiveFee"
+    ],
+    "beforeSwap": [
+      "AntiSnipe",
+      "AdaptiveFee"
+    ],
+    "launchWindow": 0,
+    "mode": 1,
+    "playbook": 0
+  },
+  "steps": [
+    {
+      "actor": "creator",
+      "amount": 0,
+      "block": 0,
+      "expect": "ok",
+      "kind": "proposeBlock",
+      "seconds": 0,
+      "target": "Light",
+      "value": 0
+    },
+    {
+      "actor": "anyone",
+      "amount": 0,
+      "block": 0,
+      "expect": "revert",
+      "kind": "execute",
+      "seconds": 0,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "attester",
+      "amount": 0,
+      "block": 1,
+      "expect": "ok",
+      "kind": "recordCheck",
+      "seconds": 2,
+      "target": "simulated",
+      "value": 0
+    },
+    {
+      "actor": "attester",
+      "amount": 0,
+      "block": 1,
+      "expect": "any",
+      "kind": "passChecks",
+      "seconds": 2,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "anyone",
+      "amount": 0,
+      "block": 2,
+      "expect": "revert",
+      "kind": "execute",
+      "seconds": 4,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "anyone",
+      "amount": 0,
+      "block": 3,
+      "expect": "revert",
+      "kind": "execute",
+      "seconds": 172800,
+      "target": "",
+      "value": 0
+    }
+  ],
+  "expect": {
+    "allSellsSucceed": true,
+    "feeNeverAboveCap": true,
+    "finalLaneLength": 2,
+    "finalMode": 255,
+    "maxSniperShareOfPoolBps": 0
+  }
+}

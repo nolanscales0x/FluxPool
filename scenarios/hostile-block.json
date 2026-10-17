@@ -1,0 +1,137 @@
+{
+  "id": "hostile-block",
+  "title": "Hostile block: rejects buys and maxes fees",
+  "description": "In a Fast pool, hostile blocks pass their checks and go live. The shell clamps fees to the cap, sells keep working, and the creator removes the buy-blocking block at once.",
+  "start": {
+    "agentLevel": 0,
+    "afterSwap": [
+      "AdaptiveFee"
+    ],
+    "beforeSwap": [
+      "AntiSnipe",
+      "AdaptiveFee"
+    ],
+    "launchWindow": 0,
+    "mode": 1,
+    "playbook": 0
+  },
+  "steps": [
+    {
+      "actor": "creator",
+      "amount": 0,
+      "block": 0,
+      "expect": "ok",
+      "kind": "proposeBlock",
+      "seconds": 0,
+      "target": "Hostile:MaxFee",
+      "value": 0
+    },
+    {
+      "actor": "attester",
+      "amount": 0,
+      "block": 0,
+      "expect": "ok",
+      "kind": "passChecks",
+      "seconds": 0,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "anyone",
+      "amount": 0,
+      "block": 0,
+      "expect": "ok",
+      "kind": "execute",
+      "seconds": 0,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "holder",
+      "amount": 500,
+      "block": 1,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 2,
+      "target": "",
+      "value": 50000
+    },
+    {
+      "actor": "creator",
+      "amount": 0,
+      "block": 2,
+      "expect": "ok",
+      "kind": "proposeBlock",
+      "seconds": 4,
+      "target": "Hostile:RejectAll",
+      "value": 0
+    },
+    {
+      "actor": "attester",
+      "amount": 0,
+      "block": 2,
+      "expect": "ok",
+      "kind": "passChecks",
+      "seconds": 4,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "anyone",
+      "amount": 0,
+      "block": 2,
+      "expect": "ok",
+      "kind": "execute",
+      "seconds": 4,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "holder",
+      "amount": 500,
+      "block": 3,
+      "expect": "revert",
+      "kind": "buy",
+      "seconds": 6,
+      "target": "",
+      "value": 0
+    },
+    {
+      "actor": "holder",
+      "amount": 500,
+      "block": 3,
+      "expect": "ok",
+      "kind": "sell",
+      "seconds": 6,
+      "target": "",
+      "value": 50000
+    },
+    {
+      "actor": "creator",
+      "amount": 0,
+      "block": 4,
+      "expect": "ok",
+      "kind": "removeBlock",
+      "seconds": 8,
+      "target": "Hostile:RejectAll",
+      "value": 0
+    },
+    {
+      "actor": "holder",
+      "amount": 500,
+      "block": 5,
+      "expect": "ok",
+      "kind": "buy",
+      "seconds": 10,
+      "target": "",
+      "value": 0
+    }
+  ],
+  "expect": {
+    "allSellsSucceed": true,
+    "feeNeverAboveCap": true,
+    "finalLaneLength": 3,
+    "finalMode": 255,
+    "maxSniperShareOfPoolBps": 0
+  }
+}
