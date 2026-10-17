@@ -1,165 +1,118 @@
-# Launch protection v1 — status and plan
+# Launch protection v1 — implementation and evidence
 
-This is our answer to the three requirements in the review, and it is deliberately split into **what is
-built** and **what is planned**, with the file and the test named for each. One of the three is
-implemented and runnable in this package today. The other two are designed and specified, and we are
-not going to describe them in the present tense until they are.
+This package implements Programmable's mandatory `launch-protection.v1` policy for FluxPool's protected
+launch, following the reference package (`packages/launch/contracts/launch-protection-v1`, branch
+`production`) and your review of `6db5908`. Every clause below is built and has a named test. Where we
+differ from the reference it is only because FluxPool's shell is one hook shared by every pool; the
+rules themselves are the reference's.
 
-The requirements, as we read them:
-
-1. Cumulative 2% limits per authenticated buyer and per recipient for five minutes, plus a fresh
-   oracle-backed $15,000 starting FDV.
-2. A mandatory opening fee starting at 99% total and decaying to normal fees over 30 seconds, the extra
-   going to the platform treasury, with the developer and up to six fixed wallets allowed to skip only
-   that extra fee. In every mode.
-3. The protection module, the normal-fee vault and the opening-tax vault separated from the hook, and
-   the exact plan submitted with permanent liquidity locking and working sells.
+**Target chain: Ethereum mainnet (chain 1).** The pool pairs **native ETH** (currency0) with a
+`FluxProtectedToken` (currency1).
 
 ---
 
-## 1. The recipient budget — built
+## 1. What changed since `6db5908`
 
-`src/protection/FluxProtectedToken.sol`, tested in `test/protection/FluxProtectedToken.t.sol` (21
-tests) and demonstrated in `test/review/ReviewDemo.t.sol` as scenario **G**.
-
-This is the half of requirement 1 that can only be enforced in the token, so it is where we started.
-The token is a fixed-supply ERC-20 with the cumulative recipient budget in `_update`, which means every
-movement passes through it:
-
-- **What counts.** Every transfer with a nonzero sender, nonzero recipient and nonzero amount. The
-  budget is `floor(launchSupply × 200 / 10_000)` and it is cumulative per recipient: receiving twice
-  adds up, and exceeding the total reverts with `WalletLimitExceeded(recipient, attempted, limit)`.
-- **What does not count, and why.** Mints, burns and self-transfers. Transfers **to the PoolManager**
-  do not count either, which is what keeps sells working: a sell settles into the PoolManager, and if
-  that counted, a wallet already at its limit could not sell. There is a test for exactly that case.
-- **It only ever increases.** Transferring out or burning does not restore it, so a wallet's 2% is a
-  total for the window and not a balance it can refill. The limit is a share of the **launch supply**,
-  immutable, so burning cannot lower it.
-- **Before `start()`** the only permitted movement is the seed: this token paying the PoolManager.
-  Anything else reverts with `TradingNotStarted`.
-- **No exemptions here, deliberately.** The policy's developer-and-six-wallets exemption covers the
-  opening **fee** only. Those wallets stay capped like everyone else, so an exemption list in the token
-  would be the wrong half of the policy.
-- **The window** is 300 seconds from `startedAt`, which is set inside the launch transaction, so the
-  initial buy is itself subject to the budget.
-
-The supply bounds have reasons rather than being copied: below 50 the 2% budget rounds to zero and the
-token could never move at all, and above `int128` max the supply would not survive the signed
-accounting a swap uses. The PoolManager passed at deploy must be a contract and must differ from the
-initializer, so the seed leg and the pool can never be the same address. No owner, no pause, no
-upgrade path, no mint after construction.
-
-Run it:
-
-```
-forge test --match-contract FluxProtectedTokenTest -vv
-forge test --match-contract ReviewDemo --match-test test_G -vv
-```
+| Your review | Now |
+| --- | --- |
+| Buyer cap / authentication still to implement | **Built.** Buyers during the 300 s window must come through the **canonical Universal Router** (`0xd92A36B0000531EF3063dEd4De20A0783308446C` on chain 1), pinned by address and code hash; the buyer is the router's own `msgSender()`. No second router, no `hookData`. |
+| Oracle floor still to implement | **Built.** `FluxLauncher.launchProtected` checks the opening valuation against the canonical Chainlink ETH/USD feed and refuses below $15,000. |
+| 30-second opening tax still to implement | **Built.** Exactly 99% at the first second, linear to the normal fee over 30 s, extra to the platform. |
+| Separate vaults still to implement | **Built.** A normal-fee vault and an opening-tax vault per pool, separate contracts, paying only fixed recipients. |
+| `FluxPlanner` still deploys `FluxToken` | **Fixed.** The plan deploys `FluxProtectedToken`, the protection module and both vaults. |
+| Nonzero LP fee needs exact evidence | **LP fee is zero** on a protected pool. Every fee is taken by the hook on the gross native leg with the reference's rounding — see §3. |
+| No second-router or custom fee-profile exception | We use the canonical buyer path only, and do not rely on `FEE_PROFILE` for recognition. |
 
 ---
 
-## 2. The buyer budget and the opening fee — planned
+## 2. The rules, where they are enforced, and the test that proves each
 
-### The buyer budget
-
-Cumulative, per **authenticated buyer**, capped at `floor(launchSupply × 200 / 10_000)`, live only
-while `now < launchStart + 300`, and it only ever increases: selling does not restore it. No
-exemptions, the developer included. It lives in the shell, because in a Uniswap v4 swap the shell is
-what sees the token leg the swapper receives.
-
-This replaces nothing: the current per-swap cap stays as an additional, stricter layer.
-
-### The opening fee
-
-Exactly 99% of the gross quote leg at the first second, decaying linearly over 30 whole seconds to the
-pool's normal fee, buys only, the extra going to the platform treasury, rounded down on the extra and
-up on the platform's 30 bps — the same arithmetic as your reference implementation. The developer plus
-up to six fixed wallets skip the extra and nothing else.
-
-**Where it cannot live, and why that matters.** Today's opening fee is a setting on a block, and
-settings are reachable through our change queue. A promise to keep the schedule in every mode would be
-false if it stayed there. The schedule, the exemption list, the caps and the normal rate therefore go
-into a **protection module's immutables**: there is no setter, so there is nothing for a mode, an
-agent, a playbook or a proposal to call. A pool launched under this policy is also staged `Locked`
-only, and the change queue will **refuse** a fee-setting change to a protected pool rather than accept
-one that would have no effect.
-
----
-
-## 3. The FDV floor, the lock and the initializer — planned
-
-- **The floor.** A Chainlink ETH/USD read against the feed pinned for the chain
-  (`0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419` on chain 1), its codehash supplied at deploy and
-  rechecked at use, decimals ≤ 18, positive answer, `updatedAt` not in the future, no older than one
-  hour, valid round — then the FDV computed from the launch supply and the opening tick price, before
-  any buy, and refused below 15,000.
-- **The lock.** The whole supply is seeded single-sided as a position **held by the shell**, and this
-  is where we are already stronger than the reference: the shell refuses liquidity from anyone but
-  itself, so there is no third-party position on the pool at all, and it refuses removal unless the
-  pool is unlocked. A `Locked` pool has no removal path. There is also no `withdrawLiquidity` call the
-  initializer could make.
-- **The initializer.** One atomic transaction: initialize the pool at the committed price, seed, start
-  the clock, and run the developer's initial buy — exempt from the extra fee, but subject to both
-  budgets, so an oversized initial buy reverts the whole launch.
-
----
-
-## 4. What we are keeping
-
-The protection layer goes **above** FluxPool, it does not replace it. The shell, the core, the blocks
-(the anti-snipe and adaptive-fee blocks, the fee-split block), the agent registry, the change queue and
-the playbooks all stay, and the protected rules are immutables that none of them can reach. Freedom
-modes keep their meaning for everything else: a community-selected Wild mode can still do everything
-it does today, and it cannot touch the layer above it. That is the same thing as saying the mandatory
-protections and the fixed 30 bps platform fee hold in every mode — they are not mode-dependent, because
-they are not settings.
-
-Two consequences worth stating before they are discovered:
-
-- **New shell code is a new address.** A v4 hook's address encodes its permissions, and even with
-  identical flags the initcode changes, so a redeploy is unavoidable. There is no proxy in the design
-  and we are not adding one.
-- **A protected launch cannot be tested on Sepolia** — the policy supports chain 1 and 4663 only, so
-  the suite for the protected path is a mainnet fork. Everything else stays on Sepolia as it is today.
-
----
-
-## 5. Three things we need from you
-
-1. **The normal fee, and where its custody sits.** Your reference takes the whole normal fee as a
-   per-swap delta with a zero LP fee. Ours is the pool's own fee, shaped by our blocks. We would keep
-   ours and give the vaults the custody — the platform's 30 bps and the opening tax per swap, and the
-   creator's share swept into the normal-fee vault — so the opening fee still decays to a rate declared
-   at launch. Does that satisfy "separate the normal-fee vault from the hook", or do you require the
-   whole normal fee to be a per-swap delta with a zero pool fee?
-2. **Buyer identity during the 300 seconds.** Your module accepts only the canonical Universal Router,
-   pinned by address and codehash, and takes the buyer from `router.msgSender()`. Our trades go through
-   our own router, which reports the trader in `hookData` from its own `msg.sender` rather than from
-   user-supplied data. We would pin our router the same way, by address and codehash, and would rather
-   support both than have you take our word for it. Is a pinned second router acceptable as an
-   authenticated-buyer source?
-3. **`FEE_PROFILE`.** Our shell names
-   `keccak256("programmable.robinhood-quote-fee.gross-quote.ceil-per-trade.fluxpool-shell.v2")`. The
-   published policy defines no Ethereum profile identifier. It is a `constant`, so it is baked into the
-   shell's bytecode and its address and has to be settled before the shell is redeployed. If you want a
-   specific value, tell us and we will use it.
-
-One thing we could not resolve on our own: the commit named in the review, `4c74f03`, does not exist in
-any of our repositories, so we would like to know which artifact it refers to. It is most likely your
-import of the package we uploaded.
-
----
-
-## 6. The sequence
-
-| Stage | What | State |
+| Policy clause | Enforced in | Evidence (`test/protection/ProtectedLaunch.t.sol` unless noted) |
 | --- | --- | --- |
-| 1 | The protected token — the recipient budget | **Built and tested** (§1) |
-| 2 | The protection module — schedule, exemptions, buyer authentication | Next |
-| 3 | The two fee vaults, and the shell's accrual wired to them | |
-| 4 | The shell's swap path: the schedule and the buyer budget — **this changes an existing ABI, so it is our own review point before it lands** | |
-| 5 | The initializer: atomic launch, Chainlink floor, permanent lock, initial buy | |
-| 6 | The plan, the mainnet-fork suite, the app re-pointing, and a rebuilt package for resubmission | |
+| Total buy fee 99% at the first second | `FluxShell._quoteFees` (reference `_quoteTradeFees`) | `test_firstSecondBuyPaysExactlyNinetyNinePercentWithZeroLpFee` |
+| Linear decay to the normal fee over 30 s | `FluxLaunchProtectionModule.additionalTaxPpmForBuyer` | `test_openingFeeDecaysLinearlyToNormalOverThirtySeconds` (seconds 1, 15, 29, 30) |
+| The extra goes to the platform treasury | opening-tax vault, `creatorRecipient = PLATFORM_RECIPIENT` | `test_custodyIsSeparateAndPaysOnlyFixedRecipients` |
+| Platform 0.3% on buys **and** sells | `_quoteFees`, platform allocated first | `test_firstSecondBuyPays…`, `test_platformTakesThirtyBpsOnSellsToo` |
+| LP fee zero; separate custody | `_resolveFee` returns 0; `_accrueFees` mints to the vaults | `…WithZeroLpFee`, `test_platformTakesThirtyBpsOnSellsToo`, `test_custodyIsSeparate…` (shell holds no fee claims) |
+| Dev + up to six wallets skip only the extra | module immutables | `test_exemptWalletPaysNormalFeeOnlyButIsStillCapped`, `test_launchIsAtomic…` (developer's initial buy) |
+| Canonical buyer path only, for 300 s | module `_buyer` | `test_buysOutsideTheCanonicalRouterAreRefusedDuringTheWindow` |
+| Cumulative 2% buyer budget, 300 s | `FluxShell._checkBuyerBudget` | `test_buyerBudgetIsCumulativeTwoPercent`, `test_buyerBudgetHoldsEvenWhenTokensGoToOtherRecipients` (isolates the shell's budget from the token's) |
+| Cumulative 2% recipient budget, 300 s | `FluxProtectedToken._update` | `test/protection/FluxProtectedToken.t.sol` (21 tests) |
+| Fresh, oracle-backed $15k starting FDV | `FluxLauncher.openingFdvUsd` | `test_launchRefusesAValuationUnderFifteenThousandDollars`, `test_launchRefusesAStaleOrBadOracle` |
+| Initial buy over 2% reverts the launch | buyer budget on the initializer's buy | `test_launchRefusesAnInitialBuyOverTwoPercent` |
+| Permanent liquidity locking | pool staged `Locked`; the shell is the only LP | `test_liquidityCanNeverBeWithdrawn` |
+| Working sells | sells never authenticated, never taxed, never blocked | `test_platformTakesThirtyBpsOnSellsToo`; invariant `invariant_sellNeverReverts` (all modes) |
+| Holds in every mode | rules are constants/immutables; LP fee pinned to 0 | protected pools ignore the core's fee; nothing a mode, block, agent or queued change can set |
+| Atomic launch | `FluxLauncher.launchProtected` | `test_launchIsAtomicLockedStartedAndBuysForTheDeveloper` |
 
-We will submit the exact plan with the rebuilt package at stage 6, and we will not submit it as
-compliant before then.
+The key protections were also **mutation-tested**: removing the opening tax, the buyer authentication
+or the buyer budget from the shell makes the corresponding tests above fail.
+
+---
+
+## 3. The fee arithmetic (identical to the reference)
+
+For a buy with gross native amount `G`, normal rate `normalPpm = (30 + creatorBuyBps) × 100` and the
+module's extra `taxPpm` for that buyer at that second:
+
+```
+total    = ceil(G × (normalPpm + taxPpm) / 1e6)        // or G − amount for exact-output
+normal   = ceil(G × normalPpm / 1e6)
+platform = ceil(G × 30 / 10_000)                        // allocated first
+creator  = normal − platform                            // → normal-fee vault, creator ledger
+tax      = total − normal                               // → opening-tax vault, platform ledger
+```
+
+`taxPpm = floor((990_000 − normalPpm) × (start + 30 − now) / 30)` for `now < start + 30`, else 0, and 0
+for an exempt wallet. Sells use the sell rate and never a tax. The pool's own LP fee is **zero** on
+every protected swap: the shell returns an LP fee of 0, so the combined fee is exactly the schedule's.
+The platform's 30 bps and the creator fee are minted as ERC-6909 claims to the normal-fee vault and
+recorded (`recordFees` checks the ledger against the claims it holds); the tax is minted to the
+opening-tax vault.
+
+---
+
+## 4. Contracts
+
+| Contract | Role |
+| --- | --- |
+| `src/shell/FluxShell.sol` | The hook (one shell for every FluxPool pool). For protected pools: LP fee 0, reference fee rules, buyer authentication through the module, buyer budget, custody to the vaults. |
+| `src/protection/FluxLaunchProtectionModule.sol` | Per-pool immutables: schedule, exemptions, canonical router and its code hash, buyer identity. Views only. |
+| `src/protection/FluxFeeVault.sol` | Deployed twice per pool: normal-fee vault (creator recipient) and opening-tax vault (platform). Backed ledgers, permissionless claims to fixed recipients. |
+| `src/protection/FluxProtectedToken.sol` | Fixed supply, recipient budget, `start()` by the initializer only. |
+| `src/launch/FluxLauncher.sol` | `launchProtected`: wiring checks, Chainlink floor, `Locked` staging, single-sided full-supply seed, `start()`, initial buy — one transaction. The launcher is the token's initializer. |
+| `script/FluxPlanner.sol`, `script/FluxPlan.s.sol` | The exact nonce-pinned plan: 16 steps, 15 components (≤ 16), each step's gas limit, `maxTotalGas` including the 6,000,000-gas stamp and a 20% margin. |
+
+Compiler: **Solidity 0.8.26, via IR, optimizer 200, Cancun, no CBOR metadata** — the reference
+package's settings. `FluxShell` is 22,956 bytes; every component is under 24,576 bytes of runtime and
+49,152 bytes of initcode.
+
+---
+
+## 5. Run it
+
+```
+git clone --recurse-submodules <this repo> && cd <it>
+FOUNDRY_PROFILE=test forge test --match-contract ProtectedLaunchTest -vv   # the evidence in §2
+FOUNDRY_PROFILE=test forge test                                            # everything (430 tests)
+forge build --sizes --skip test                                            # deployed bytecode, size-checked
+DRY_RUN=true forge script script/FluxPlan.s.sol                            # the plan, simulated on chain 1
+forge script script/FluxPlan.s.sol --fork-url $ETH_RPC_URL                 # the real plan on a mainnet fork
+```
+
+`FOUNDRY_PROFILE=test` compiles the same sources without via IR, which only changes code generation
+and makes the suite build in seconds. The protected tests run on simulated chain 1 with mocks placed at
+the canonical Universal Router and Chainlink feed addresses (`vm.etch`), so the policy's address and
+code-hash checks run unchanged.
+
+---
+
+## 6. Still open, stated plainly
+
+- **Mainnet-fork run.** The suite above is local (simulated chain 1). The same plan runs on a mainnet
+  fork with `--fork-url`; we have not attached its output yet.
+- **Placeholders in `deploy/fluxpool-token.config.json`** — Safe, controller, developer, ticker, supply,
+  opening tick, initial buy. The plan script refuses to build a real plan while any remain.
+- **The exact request ID** will be sent with this package.
+- **`FEE_PROFILE`** remains a label in the shell; we understand it establishes nothing and do not rely
+  on it.

@@ -92,7 +92,13 @@ contract FluxShellTest is Test, Deployers {
             timelockDelay: 48 hours,
             lockType: lockType,
             unlockAt: unlockAt,
-            launchMode: 0
+            launchMode: 0,
+            protectedLaunch: false,
+            protectionModule: address(0),
+            normalFeeVault: address(0),
+            openingTaxVault: address(0),
+            normalBuyFeeBps: 0,
+            normalSellFeeBps: 0
         });
     }
 

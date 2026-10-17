@@ -1,4 +1,4 @@
-# Review: what is enforced, where, and what is not built yet
+# Review: what is enforced, and where
 
 This document answers, one by one, the three things asked for in the Programmable Custom Launch
 review, plus the condition that a community-selected Wild mode cannot bypass the mandatory launch
@@ -8,16 +8,16 @@ Every claim below names the contract and line that enforces it, and the test in
 `test/review/ReviewDemo.t.sol` that proves it. The test is the authority: if a claim here is wrong,
 the demo fails.
 
-**Update, after the launch-protection review.** That review asked for three further things —
-cumulative 2% buyer and recipient budgets for five minutes with an oracle-backed $15,000 starting FDV,
-a mandatory 99%-to-normal opening fee decaying over 30 seconds in every mode, and the protection
-module and the two fee vaults separated from the hook. [PROTECTION.md](PROTECTION.md) answers them:
-what is built already, what is specified and not yet built, and the three points we need your reading
-on. The one that is built — the recipient budget — is enforced by
-`src/protection/FluxProtectedToken.sol` and demonstrated as scenario **G** below.
+**Update, after the launch-protection reviews.** The mandatory `launch-protection.v1` policy is now
+implemented in full and is documented, clause by clause with the test that proves each, in
+[PROTECTION.md](PROTECTION.md): the canonical Universal Router as the only buyer path for 300 seconds,
+cumulative 2% buyer and recipient budgets, the $15,000 Chainlink-checked opening valuation, the exact
+99%-to-normal opening fee over 30 seconds with a zero LP fee, the platform's 0.3% on both sides, the
+normal-fee and opening-tax vaults, the permanent lock and the atomic launch. **Target chain: Ethereum
+mainnet (chain 1).** The sections below cover the earlier review's questions and still hold.
 
 ```
-forge test --match-contract ReviewDemo -vv
+FOUNDRY_PROFILE=test forge test --match-contract ReviewDemo -vv
 ```
 
 ---
@@ -31,27 +31,27 @@ that write through the core. A proposal outside the range is rejected before any
 
 | Block | Setting | Range | Enforced at |
 | --- | --- | --- | --- |
-| AntiSnipe | `openingFee` | 10,000 – 990,000 (hundredths of a bip, i.e. 1% – 99%) | `src/blocks/AntiSnipe.sol:43` |
+| AntiSnipe | `openingFee` | 10,000 – 990,000 (hundredths of a bip, i.e. 1% – 99%) | `src/blocks/AntiSnipe.sol` |
 | AntiSnipe | `maxBuyBps` | 10 – 500 (0.1% – 5% of the token reserve per swap) | same |
 | AntiSnipe | `maxBuysPerBlock` | 1 – 20 | same |
-| AdaptiveFee | `threshold` | 5,000 – 200,000 (ppm of reserve net sold per block) | `src/blocks/AdaptiveFee.sol:47` |
+| AdaptiveFee | `threshold` | 5,000 – 200,000 (ppm of reserve net sold per block) | `src/blocks/AdaptiveFee.sol` |
 | AdaptiveFee | `maxFee` | 0 – 50,000 (0% – 5%) | same |
 | AdaptiveFee | `windowBlocks` | 5 – 200 | same |
-| CreatorFee | `creatorShareBps` | 2,000 – 8,000 (20% – 80% of project fees) | `src/blocks/CreatorFee.sol:15` |
+| CreatorFee | `creatorShareBps` | 2,000 – 8,000 (20% – 80% of project fees) | `src/blocks/CreatorFee.sol` |
 | CreatorFee | `agentShareBps` | 0 – 2,000 (0% – 20%) | same |
 
 A setting the block does not expose is rejected as well: the range read reverts and the revert is
 treated as "no such setting" rather than as a pass.
 
-Enforcement is in `ChangeRegistry._classifySetting` (`src/gates/ChangeRegistry.sol:379`), which reads
+Enforcement is in `ChangeRegistry._classifySetting` (`src/gates/ChangeRegistry.sol`), which reads
 the block's own `settingBounds` under a gas limit — blocks are untrusted, so a block that reverts or
 misbehaves cannot widen its own range — and rejects with `OutOfBounds()` at line 385. Playbooks are
-checked against the same ranges at approval (`src/playbooks/PlaybookRegistry.sol:134`).
+checked against the same ranges at approval (`src/playbooks/PlaybookRegistry.sol`).
 
 ### Caps that no proposal can reach, in any mode
 
 The shell holds a second, coarser set of ceilings as `constant`s, checked when a pool is staged
-(`src/shell/FluxShell.sol:270`, reverting `InvalidSetup()` at line 288):
+(`src/shell/FluxShell.sol`, reverting `InvalidSetup()` at line 288):
 
 | Constant | Value | Line |
 | --- | --- | --- |
@@ -63,27 +63,27 @@ The shell holds a second, coarser set of ceilings as `constant`s, checked when a
 | `MAX_AGENT_SHARE_BPS` | 2,000 | 70 |
 
 The fee split is clamped to those two share ceilings again on every swap
-(`src/shell/FluxShell.sol:609` and `:613`), so a block cannot return a split above them either.
+(`src/shell/FluxShell.sol`), so a block cannot return a split above them either.
 
 ### The platform fee
 
 `PLATFORM_FEE_BPS = 30` and `PLATFORM_RECIPIENT` are `constant`s in the shell
-(`src/shell/FluxShell.sol:79-80`). The fee is charged inside the hook on every buy and every sell,
+(`src/shell/FluxShell.sol`). The fee is charged inside the hook on every buy and every sell,
 whichever way the core behaves: gross quote, rounded up per trade (`quotePlatformFee`,
-`src/shell/FluxShell.sol:378`), accrued as a backed claim, and payable only to that fixed recipient by
-`claimPlatform()` (`src/shell/FluxShell.sol:368`, transfer at `:392`). It is not part of the project
+`src/shell/FluxShell.sol`), accrued as a backed claim, and payable only to that fixed recipient by
+`claimPlatform()` (`src/shell/FluxShell.sol`). It is not part of the project
 fee split and no block can touch it.
 
 **The recipient and the rate are Programmable's own.** `PLATFORM_RECIPIENT` is
 `0xD88539d3c4C460136a733A3Fd60cf6BF269079da` and `PLATFORM_FEE_BPS` is `30`
-(`src/shell/FluxShell.sol:79-80`). These are the `openingTaxRecipient` and `platformFeeBps` that
+(`src/shell/FluxShell.sol`). These are the `openingTaxRecipient` and `platformFeeBps` that
 Programmable publishes in `programmable.launch-protection.v1`
 (`GET https://api.programmable.market/v1/launch-protection`). An earlier version of this document
 called the recipient a pre-Programmable placeholder. That was our error: the address was correct, and
 the document was not. Both values are `constant`, so they are fixed in the shell's bytecode and its
 CREATE2 address, and no transaction can change them.
 
-`FEE_PROFILE` (`src/shell/FluxShell.sol:82`) is the one value still open. It names the fee arithmetic
+`FEE_PROFILE` (`src/shell/FluxShell.sol`) is the one value still open. It names the fee arithmetic
 the shell implements (gross quote, rounded up per trade) under the Robinhood profile identifier. The
 published policy does not define an Ethereum profile identifier, so if you need a different one for
 Ethereum, tell us which; it is also a `constant`, and changing it is a redeploy of the shell.
@@ -109,31 +109,31 @@ An agent is one address, on one pool, at one level:
 
 | Level | May do | Declared at |
 | --- | --- | --- |
-| `None` | nothing | `src/agents/AgentRegistry.sol:23` |
+| `None` | nothing | `src/agents/AgentRegistry.sol` |
 | `Fire` | `fire(playbookId)` | same |
 | `ProposeSettings` | `+ proposeSetting` | same |
 | `ProposeCode` | `+ proposeBlock`, `proposeLaneChange` | same |
 
-`AgentRegistry.authorize` (`src/agents/AgentRegistry.sol:170`) is the single gate every agent action
+`AgentRegistry.authorize` (`src/agents/AgentRegistry.sol`) is the single gate every agent action
 passes through, and it checks, in order: the caller is a registry (not an arbitrary address), the
 caller is this pool's registered agent, the level is high enough, and the rate limits allow it. The
-registries call it on the real paths — `PlaybookRegistry.fire` at `src/playbooks/PlaybookRegistry.sol:174`
-and `ChangeRegistry.proposeSetting` at `src/gates/ChangeRegistry.sol:162`.
+registries call it on the real paths — `PlaybookRegistry.fire` at `src/playbooks/PlaybookRegistry.sol`
+and `ChangeRegistry.proposeSetting` at `src/gates/ChangeRegistry.sol`.
 
-Rate limits are bounded too, with the defaults and the floors in `src/agents/AgentRegistry.sol:47-51`:
+Rate limits are bounded too, with the defaults and the floors in `src/agents/AgentRegistry.sol`:
 60 seconds minimum between actions and 48 actions a UTC day by default, a floor of 10 seconds and a
 ceiling of 200 a day that no proposal can exceed.
 
 No level can move funds, change a cap, approve a playbook, change the freedom mode or touch the shell:
 those calls do not exist for agents at any level. Agents cannot change the `CreatorFee` block's
-settings at all, in any mode (`src/gates/ChangeRegistry.sol:161`).
+settings at all, in any mode (`src/gates/ChangeRegistry.sol`).
 
 ### Revocation, enforced on chain today
 
-`removeAgent` (`src/agents/AgentRegistry.sol:115`) is creator-only, applies in the transaction it is
-sent in, and bumps an epoch (`_applyInstant`, `src/agents/AgentRegistry.sol:218`) so that any raise
+`removeAgent` (`src/agents/AgentRegistry.sol`) is creator-only, applies in the transaction it is
+sent in, and bumps an epoch (`_applyInstant`, `src/agents/AgentRegistry.sol`) so that any raise
 still queued from before is void and cannot resurrect the agent
-(`applyQueued`, `src/agents/AgentRegistry.sol:153`, reverting `StaleChange()`). Lowering a level is
+(`applyQueued`, `src/agents/AgentRegistry.sol`, reverting `StaleChange()`). Lowering a level is
 instant for the same reason; raising one never is.
 
 ### What is not built
@@ -161,7 +161,7 @@ present the off-chain policy as an enforced one.
 ## 3. Upgrade and timelock permissions
 
 Everything that is not a tightening playbook goes through `ChangeRegistry`, under the pool's freedom
-mode, and the timing is the whole point (`src/gates/ChangeRegistry.sol:16-24`):
+mode, and the timing is the whole point (`src/gates/ChangeRegistry.sol`):
 
 | Change | Guarded | Fast | Wild |
 | --- | --- | --- | --- |
@@ -173,15 +173,15 @@ mode, and the timing is the whole point (`src/gates/ChangeRegistry.sol:16-24`):
 | Switching to a safer mode | n/a | instant | instant |
 | Anything outside a setting's bounds | rejected | rejected | rejected |
 
-- **Queue and execute.** `execute` (`src/gates/ChangeRegistry.sol:303`) is permissionless: it rejects
+- **Queue and execute.** `execute` (`src/gates/ChangeRegistry.sol`) is permissionless: it rejects
   `TooEarly` before the delay, and the delay *is* the permission. Nothing needs a role.
 - **Checks.** A new block in a lane needs `compiled`, `interface`, `simulated` and `sourceVerified`
   recorded by an attester before it can execute (`_storeRequiredChecks`,
-  `src/gates/ChangeRegistry.sol:439`), unless the pool is in Wild. An attester can record results and
+  `src/gates/ChangeRegistry.sol`), unless the pool is in Wild. An attester can record results and
   nothing else: it cannot push a change through. A failed check is final, and *any* failed check —
   required or not — stops the change permanently.
 - **Cancel.** The pool's creator can cancel any queued change at any time
-  (`src/gates/ChangeRegistry.sol:329`), instantly.
+  (`src/gates/ChangeRegistry.sol`), instantly.
 - **No skip on the way down.** A pool moving to a safer mode also slows down what is already queued:
   `execute` takes the stricter of the delay the change was queued under and the pool's current mode.
 - **The agent off switch is never timelocked**, in any mode. That asymmetry is deliberate: adding an
@@ -201,17 +201,17 @@ same in all three modes (`test_B_wildMode_changesTheWait_notTheLimits` shows the
 behaving, and the mode-independent parts not moving):
 
 1. **Fees stay under the cap.** The fee the core returns is clamped to `launchFeeCap` inside the
-   launch window and `feeCap` after it (`_resolveFee`, `src/shell/FluxShell.sol:555`; the active cap
-   is chosen at `:562` and the clamp applied at `:566`). Both caps are staged at launch, bounded by the
+   launch window and `feeCap` after it (`_resolveFee`, `src/shell/FluxShell.sol`; and). Both caps are staged at launch, bounded by the
    constants above, and unreachable by any proposal.
 2. **Sells always go through.** If a swap sells the launched token, the shell ignores a rejection from
-   the core: a rejection only reverts when the swap is a buy (`src/shell/FluxShell.sol:565`). The core
+   the core: a rejection only reverts when the swap is a buy (`src/shell/FluxShell.sol`). The core
    can only ever reject a buy.
 3. **Locked liquidity stays locked.** The shell holds the launch position; nobody can withdraw it
    early, the creator included, until its unlock time
-   (`_beforeRemoveLiquidity`, `src/shell/FluxShell.sol:454`, `LiquidityLocked` at `:462`).
-4. **No new tokens, ever.** Fixed supply, and the only `_mint` in the entire source tree is the one in
-   the token's own constructor: `src/launch/FluxToken.sol:11`. There is no mint function to call.
+   (`_beforeRemoveLiquidity`, `src/shell/FluxShell.sol`, `LiquidityLocked`).
+4. **No new tokens, ever.** Fixed supply: the protected launch token, `src/protection/FluxProtectedToken.sol`,
+   mints its whole supply once in its constructor to the launcher (its initializer). There is no mint
+   function to call.
 
 None of these is a setting, so no mode and no proposal can reach them.
 
@@ -223,27 +223,22 @@ read the mode.
 at once instead of waiting out the timelock. The bounds themselves are unchanged — the demo asserts
 that the same out-of-range values are rejected in Wild exactly as in Guarded. And the one timelock
 that matters most for your condition, **raising an agent's level**, stays timelocked in Wild too
-(`_needsDelay`, `src/gates/ChangeRegistry.sol:510`, returns `true` for agent changes in every mode).
+(`_needsDelay`, `src/gates/ChangeRegistry.sol`, returns `true` for agent changes in every mode).
 The demo proves that as well.
 
-**The reviewed liquidity and sell guarantees.** Two halves of this are now defined and one is not.
-Permanent liquidity locking and working sells are specified in [PROTECTION.md](PROTECTION.md) §3: the
-launch position is held by the shell, the shell refuses liquidity from anyone else, a protected pool
-is staged `Locked` only so there is no removal path, and a sell is exempt from every protection budget
-because a sell settles into the PoolManager. Those are the invariants we will implement and test. What
-is still open is your side of it. The mechanism to require your verification on a pool's new blocks
-exists — `ChangeRegistry.setRequireProgrammable`, `src/gates/ChangeRegistry.sol:238`, the check added
-at `:445` — but we do not have your verification API, and gating block activation on a check is not the
-same thing as a reviewed liquidity lock or a reviewed sell guarantee, so we are not going to describe
-it as one. Tell us what those guarantees require of the shell and we will implement them as invariants
-with tests, the way the rest of this layer is built.
+**The liquidity and sell guarantees.** A protected pool is staged `Locked`, its whole supply is seeded
+as a position held by the shell (which refuses liquidity from anyone else), and there is no removal
+path — `test_liquidityCanNeverBeWithdrawn`. Sells are never authenticated, never taxed and never
+blocked — `test_platformTakesThirtyBpsOnSellsToo` and the invariant `invariant_sellNeverReverts` in every
+mode. The mechanism to require your verification on a pool's new blocks also exists
+(`ChangeRegistry.setRequireProgrammable`).
 
 ---
 
 ## The live testnet deployment
 
 The demo runs against a fresh deployment of these exact contracts, so it needs no keys and no network.
-The same contracts (this code, deployed from the same sources) are live on Sepolia, where a real buy
+An earlier version of these contracts, from before the protection layer, is live on Sepolia, where a real buy
 and sell have executed through the shell, the 30 bps platform fee accrued on both, and
 `claimPlatform()` paid it to the fixed recipient.
 
@@ -261,7 +256,7 @@ and sell have executed through the shell, the 30 bps platform fee accrued on bot
 Read from the live shell: `PLATFORM_FEE_BPS` 30, `MAX_FEE_CAP` 100,000, `MAX_LAUNCH_FEE_CAP` 990,000,
 `MAX_LAUNCH_WINDOW` 3,600, `MAX_CREATOR_SHARE_BPS` 8,000, `MAX_AGENT_SHARE_BPS` 2,000,
 `MIN_TIMELOCK_DELAY` 86,400. Read from the live blocks, `settingBounds` returns exactly the ranges in
-the first table of this document. The deployed contracts are the ones this package contains.
+the first table of this document. Those deployed contracts predate the protection layer in this package.
 
 The pool's creator is readable on chain (`FluxShell.governanceOf(poolId)`), and the pool id is derived
 from the pool key (`keccak256(abi.encode(poolKey))`) rather than stored anywhere in this repository.
@@ -280,11 +275,8 @@ Three items are worth restating because they are the honest gaps rather than omi
 
 - **The AA session-key stack is not built** (section 2). Scope and revocation are enforced by
   `AgentRegistry` today; there is no smart account, bundler or paymaster yet.
-- **The reviewed liquidity and sell guarantees are not implemented** (section above). We have the
-  mechanism to require your verification on new blocks and no definition of what else those
-  guarantees require.
-- **The launch-protection rebuild is part-built** ([PROTECTION.md](PROTECTION.md)). The recipient
-  budget is implemented and tested — `src/protection/FluxProtectedToken.sol`, scenario G below. The
-  buyer budget, the opening-fee module, the two fee vaults and the initializer are specified with the
-  files they will land in and the sequence they land in, and this package does not claim them as
-  built. The exact plan is the stage-6 submission.
+- **The protected launch has been run on a simulated chain 1, not yet on a mainnet fork.** The tests
+  place mocks at the canonical Universal Router and Chainlink feed addresses; the same plan runs on a
+  fork with `forge script script/FluxPlan.s.sol --fork-url $ETH_RPC_URL`.
+- **The Sepolia deployment above predates the protection layer.** The protected launch supports
+  chains 1 and 4663 only, so it cannot be deployed to Sepolia.
