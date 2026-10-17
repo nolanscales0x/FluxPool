@@ -8,6 +8,14 @@ Every claim below names the contract and line that enforces it, and the test in
 `test/review/ReviewDemo.t.sol` that proves it. The test is the authority: if a claim here is wrong,
 the demo fails.
 
+**Update, after the launch-protection review.** That review asked for three further things —
+cumulative 2% buyer and recipient budgets for five minutes with an oracle-backed $15,000 starting FDV,
+a mandatory 99%-to-normal opening fee decaying over 30 seconds in every mode, and the protection
+module and the two fee vaults separated from the hook. [PROTECTION.md](PROTECTION.md) answers them:
+what is built already, what is specified and not yet built, and the three points we need your reading
+on. The one that is built — the recipient budget — is enforced by
+`src/protection/FluxProtectedToken.sol` and demonstrated as scenario **G** below.
+
 ```
 forge test --match-contract ReviewDemo -vv
 ```
@@ -66,12 +74,19 @@ whichever way the core behaves: gross quote, rounded up per trade (`quotePlatfor
 `claimPlatform()` (`src/shell/FluxShell.sol:368`, transfer at `:392`). It is not part of the project
 fee split and no block can touch it.
 
-**One thing we cannot show you yet, and it is the one this section is really about.** The fee *rate*
-is 30 bps, but `PLATFORM_RECIPIENT` and `FEE_PROFILE` (`src/shell/FluxShell.sol:79`, `:82`) still hold
-our pre-Programmable values, because we have not been given Programmable's Ethereum fee recipient or
-fee profile. Both are `constant`. Supplying the real values changes the shell's bytecode, and
-therefore its CREATE2 address, so it is a redeploy of the shell — which we will do as soon as we have
-them. The values currently deployed are readable on chain; we have not printed them here.
+**The recipient and the rate are Programmable's own.** `PLATFORM_RECIPIENT` is
+`0xD88539d3c4C460136a733A3Fd60cf6BF269079da` and `PLATFORM_FEE_BPS` is `30`
+(`src/shell/FluxShell.sol:79-80`). These are the `openingTaxRecipient` and `platformFeeBps` that
+Programmable publishes in `programmable.launch-protection.v1`
+(`GET https://api.programmable.market/v1/launch-protection`). An earlier version of this document
+called the recipient a pre-Programmable placeholder. That was our error: the address was correct, and
+the document was not. Both values are `constant`, so they are fixed in the shell's bytecode and its
+CREATE2 address, and no transaction can change them.
+
+`FEE_PROFILE` (`src/shell/FluxShell.sol:82`) is the one value still open. It names the fee arithmetic
+the shell implements (gross quote, rounded up per trade) under the Robinhood profile identifier. The
+published policy does not define an Ethereum profile identifier, so if you need a different one for
+Ethereum, tell us which; it is also a `constant`, and changing it is a redeploy of the shell.
 
 ### There is no admin path
 
@@ -211,14 +226,17 @@ that matters most for your condition, **raising an agent's level**, stays timelo
 (`_needsDelay`, `src/gates/ChangeRegistry.sol:510`, returns `true` for agent changes in every mode).
 The demo proves that as well.
 
-**The reviewed liquidity and sell guarantees are the gap.** The mechanism exists — a pool can make
-`programmableVerified` a required check on its new blocks, one-way
-(`ChangeRegistry.setRequireProgrammable`, `src/gates/ChangeRegistry.sol:238`; the check is added at
-`:445`) — but we cannot claim it covers reviewed liquidity, because we do not have your verification
-API and, more importantly, we do not know what the guarantee requires of us. Gating block activation
-on a check is not the same thing as a reviewed liquidity lock or a reviewed sell guarantee, and we are
-not going to describe it as one. Tell us what those guarantees require of the shell and we will
-implement them as invariants with tests, the way the rest of this layer is built.
+**The reviewed liquidity and sell guarantees.** Two halves of this are now defined and one is not.
+Permanent liquidity locking and working sells are specified in [PROTECTION.md](PROTECTION.md) §3: the
+launch position is held by the shell, the shell refuses liquidity from anyone else, a protected pool
+is staged `Locked` only so there is no removal path, and a sell is exempt from every protection budget
+because a sell settles into the PoolManager. Those are the invariants we will implement and test. What
+is still open is your side of it. The mechanism to require your verification on a pool's new blocks
+exists — `ChangeRegistry.setRequireProgrammable`, `src/gates/ChangeRegistry.sol:238`, the check added
+at `:445` — but we do not have your verification API, and gating block activation on a check is not the
+same thing as a reviewed liquidity lock or a reviewed sell guarantee, so we are not going to describe
+it as one. Tell us what those guarantees require of the shell and we will implement them as invariants
+with tests, the way the rest of this layer is built.
 
 ---
 
@@ -258,10 +276,15 @@ This is the contracts package and the demo, deliberately: the repository that ca
 monorepo (a Next.js app, an in-process indexer, five services, an SDK and an MCP server) and none of
 that is needed to review the three questions above. Ask and we will open any part of it.
 
-Two items are worth restating because they are the honest gaps rather than omissions:
+Three items are worth restating because they are the honest gaps rather than omissions:
 
 - **The AA session-key stack is not built** (section 2). Scope and revocation are enforced by
   `AgentRegistry` today; there is no smart account, bundler or paymaster yet.
 - **The reviewed liquidity and sell guarantees are not implemented** (section above). We have the
   mechanism to require your verification on new blocks and no definition of what else those
   guarantees require.
+- **The launch-protection rebuild is part-built** ([PROTECTION.md](PROTECTION.md)). The recipient
+  budget is implemented and tested — `src/protection/FluxProtectedToken.sol`, scenario G below. The
+  buyer budget, the opening-fee module, the two fee vaults and the initializer are specified with the
+  files they will land in and the sequence they land in, and this package does not claim them as
+  built. The exact plan is the stage-6 submission.

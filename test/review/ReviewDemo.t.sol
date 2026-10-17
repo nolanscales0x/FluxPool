@@ -8,6 +8,7 @@ import {PoolSwapTest} from "@uniswap/v4-core/src/test/PoolSwapTest.sol";
 import {AgentRegistry} from "../../src/agents/AgentRegistry.sol";
 import {ChangeRegistry} from "../../src/gates/ChangeRegistry.sol";
 import {PlaybookRegistry} from "../../src/playbooks/PlaybookRegistry.sol";
+import {FluxProtectedToken} from "../../src/protection/FluxProtectedToken.sol";
 import {FluxTestBase} from "../utils/FluxTestBase.sol";
 
 /// @title ReviewDemo
@@ -21,6 +22,8 @@ import {FluxTestBase} from "../utils/FluxTestBase.sol";
 ///   D. The scope of an agent's session: one pool, one level, rate limited.
 ///   E. That revocation is instant and voids a queued raise.
 ///   F. That settings and mode changes are timelocked, and that execution is permissionless.
+///   G. The recipient budget a protected launch token enforces: cumulative 2% per wallet for five
+///      minutes, with sells exempt because a sell settles into the PoolManager.
 ///
 /// Run it: `forge test --match-contract ReviewDemo -vv`
 ///
@@ -356,6 +359,64 @@ contract ReviewDemo is FluxTestBase {
         vm.warp(modeEarliest);
         changeRegistry.execute(modeId);
         assertEq(uint8(changeRegistry.modeOf(poolId)), 1);
+    }
+
+    // ------------------------------------------------------------------
+    // G. The recipient budget of a protected launch token
+    // ------------------------------------------------------------------
+
+    /// @notice One of the three things the review asks for is the cumulative 2% recipient limit, and it
+    /// can only be enforced in the token rather than in the hook — so this runs the token itself,
+    /// against the real PoolManager this suite already deploys. Exactly 2% may reach a wallet, one unit
+    /// more reverts, a wallet at its limit can still sell, and nothing is capped at five minutes.
+    function test_G_protectedToken_capsEachRecipientAtTwoPercentForFiveMinutes() public {
+        address initializer = makeAddr("protectedInitializer");
+        uint256 supply = 1_000_000_000e18;
+        FluxProtectedToken token = new FluxProtectedToken("Protected", "PROT", supply, initializer, address(manager));
+        uint256 limit = token.walletTokenLimit();
+
+        emit log_string("the whole supply is minted once, and 2% of it is the limit per recipient");
+        assertEq(token.balanceOf(initializer), supply);
+        assertEq(limit, supply * 200 / 10_000);
+
+        emit log_string("before trading opens, the seed is the only movement allowed");
+        vm.prank(initializer);
+        vm.expectRevert(FluxProtectedToken.TradingNotStarted.selector);
+        token.transfer(trader, 1);
+        vm.prank(initializer);
+        token.transfer(address(manager), limit); // the seed, into the pool
+
+        vm.prank(initializer);
+        token.start();
+        assertEq(token.protectionEndsAt(), block.timestamp + 300);
+
+        emit log_string("exactly 2% reaches a recipient; one unit more reverts");
+        vm.prank(initializer);
+        token.transfer(trader, limit);
+        assertEq(token.receivedDuringProtection(trader), limit);
+        vm.prank(initializer);
+        vm.expectRevert(
+            abi.encodeWithSelector(FluxProtectedToken.WalletLimitExceeded.selector, trader, limit + 1, limit)
+        );
+        token.transfer(trader, 1);
+
+        emit log_string("selling everything is allowed, and does not give the budget back");
+        vm.prank(trader);
+        token.transfer(address(manager), limit);
+        assertEq(token.balanceOf(trader), 0);
+        assertEq(token.receivedDuringProtection(trader), limit);
+        vm.prank(initializer);
+        vm.expectRevert(
+            abi.encodeWithSelector(FluxProtectedToken.WalletLimitExceeded.selector, trader, limit + 1, limit)
+        );
+        token.transfer(trader, 1);
+
+        emit log_string("at five minutes the cap is gone and nothing further is recorded");
+        vm.warp(block.timestamp + 300);
+        vm.prank(initializer);
+        token.transfer(trader, limit);
+        assertEq(token.balanceOf(trader), limit);
+        assertEq(token.receivedDuringProtection(trader), limit);
     }
 }
 
