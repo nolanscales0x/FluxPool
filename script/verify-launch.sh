@@ -4,7 +4,7 @@
 #   script/verify-launch.sh [--plan deploy/out/plan.json] [--rpc <url>] [--submit]
 #
 # Without --submit it only checks, and sends nothing anywhere:
-#   - it rebuilds with the launch profile (via IR, optimizer 200, no CBOR metadata), so the artifacts
+#   - it rebuilds src/ with the launch profile (via IR, optimizer 200, no CBOR metadata), so the artifacts
 #     are the ones the plan was built from rather than whatever profile built last;
 #   - for every component it checks that the plan's initcode begins with this build's creation code, and
 #     takes the rest as the constructor arguments (FluxShell's comes out of FluxDeployer.deploy's
@@ -52,8 +52,10 @@ component() {
   esac
 }
 
-echo "== building with the launch profile"
-FOUNDRY_PROFILE=default forge build >/dev/null 2>&1 || { echo "the build failed" >&2; exit 1; }
+echo "== building src/ with the launch profile"
+# Every component is in src/. Building only src/ keeps a fresh checkout to about a minute: via IR, the
+# whole tree with its tests takes over an hour.
+FOUNDRY_PROFILE=default forge build src >/dev/null 2>&1 || { echo "the build failed" >&2; exit 1; }
 
 FAIL=0
 COUNT=0

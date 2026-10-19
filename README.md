@@ -17,6 +17,25 @@ FOUNDRY_PROFILE=test forge test --match-contract ProtectedLaunchTest -vv
 DRY_RUN=true forge script script/FluxPlan.s.sol     # the exact 16-step plan, simulated on chain 1
 ```
 
+## The launch: Programmable's Ethereum Custom Launch API (V3)
+
+The launch goes through Programmable's V3 API, which deploys a CREATE2 graph through its Router in one
+transaction. The contracts are the same; the deployment is in two phases:
+
+1. **Phase 1**, nine shared contracts from the controller at pinned nonces
+   ([`script/FluxPlanV3.s.sol`](script/FluxPlanV3.s.sol)): CreatorFee, the agent, change and playbook
+   registries, the core implementation, the launcher, AntiSnipe, AdaptiveFee and the revenue router. A
+   CREATE address depends only on the nonce, so they can name the graph's addresses without a cycle.
+2. **Phase 2**, the V3 graph, one Router transaction of about 9.3M gas: the token, the shell (the hook),
+   the protection module, both fee vaults, and
+   [`FluxGraphInitializer`](src/launch/FluxGraphInitializer.sol). Its `launch` call carries the initial
+   buy to `FluxLauncher.launchProtected` and passes any dust or refund to the developer.
+
+[`programmable/build-v3.mjs`](programmable/build-v3.mjs) compiles the graph from these exact sources
+(solc 0.8.26, via IR, optimizer 200, Cancun, no metadata hash, no CBOR), declares every runtime
+immutable, and writes the pack configuration that Programmable's `programmable-launch pack` turns into
+the launch request.
+
 ## Run it
 
 ```
@@ -56,7 +75,9 @@ deployed bytecode uses the reference package's settings (via IR, optimizer 200, 
   playbook registries, the token and the launch contracts, and `src/protection/`, where the
   launch-protection rebuild lands.
 - `test/` — the full suite, including `test/review/ReviewDemo.t.sol`.
-- `script/` — the deployment scripts, and three read-only launch-day checks:
+- `programmable/` — the V3 pack builder.
+- `script/` — the deployment scripts (`FluxPlanV3.s.sol` is phase 1 of the V3 launch), and three
+  read-only launch-day checks:
   - `CheckOpening.s.sol` repeats the launcher's own opening-valuation check against live Chainlink
     ETH/USD, so the $15,000 floor is confirmed before the launch step is signed;
   - `verify-launch.sh` rebuilds with the launch settings, checks that every component's initcode in
@@ -83,7 +104,9 @@ Stated in full in [REVIEW.md](REVIEW.md) and [PROTECTION.md](PROTECTION.md):
    of Ethereum mainnet: the real 16-step plan built against the real PoolManager, the canonical
    Universal Router and the live Chainlink ETH/USD feed. Every step was then sent in nonce order,
    and all 16 landed at their pinned addresses. A buy through the canonical router afterwards paid
-   the opening tax into its vault. The unit suite runs on a simulated chain 1 with mocks at those
+   the opening tax into its vault. The V3 launch was rehearsed the same way: phase 1 from the
+   controller, then the graph created at the addresses Programmable's `pack` predicts, with every
+   deployed runtime equal to the runtime the pack declares, and the same initial buy. The unit suite runs on a simulated chain 1 with mocks at those
    addresses.
 3. **The published launch config keeps placeholders** (Safe, controller, developer, ticker, supply,
    opening tick, initial buy). The real values stay private until launch day; the plan script refuses
