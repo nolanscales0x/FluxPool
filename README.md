@@ -33,7 +33,7 @@ Foundry 1.8.5 or newer. No keys, no RPC, no network beyond the dependencies: the
 contracts to a fresh EVM and exercises the same code paths a live pool does. It runs in about 20
 milliseconds.
 
-The whole suite is `FOUNDRY_PROFILE=test forge test` (430 tests). The demo is seven of them.
+The whole suite is `FOUNDRY_PROFILE=test forge test` (431 tests). The demo is seven of them.
 `FOUNDRY_PROFILE=test` builds the same sources without via IR, which only changes code generation; the
 deployed bytecode uses the reference package's settings (via IR, optimizer 200, no CBOR metadata) and
 `forge build --sizes --skip test` checks it against the size limits.
@@ -56,7 +56,12 @@ deployed bytecode uses the reference package's settings (via IR, optimizer 200, 
   playbook registries, the token and the launch contracts, and `src/protection/`, where the
   launch-protection rebuild lands.
 - `test/` — the full suite, including `test/review/ReviewDemo.t.sol`.
-- `script/` — the deployment scripts.
+- `script/` — the deployment scripts, and three read-only launch-day checks:
+  - `CheckOpening.s.sol` repeats the launcher's own opening-valuation check against live Chainlink
+    ETH/USD, so the $15,000 floor is confirmed before the launch step is signed;
+  - `verify-launch.sh` rebuilds with the launch settings, checks that every component's initcode in
+    the plan is this source's build, and submits the source for verification after deployment;
+  - `DeploySafe.s.sol` creates the project's 2-of-3 Safe from Safe's canonical v1.4.1 contracts.
 
 `src/` is the layer that does not change. It has no proxy, no owner, no upgrade function and no setter
 for any of its constants.
@@ -73,11 +78,16 @@ Stated in full in [REVIEW.md](REVIEW.md) and [PROTECTION.md](PROTECTION.md):
 1. **The account-abstraction session key is not built.** Scope and revocation *are* enforced on chain
    today, by `AgentRegistry`: one address, one pool, one level, rate limited, with an instant off
    switch. But there is no smart account, bundler or paymaster yet.
-2. **The protected launch has been run on a simulated chain 1, not yet on a mainnet fork.** The tests
-   place mocks at the canonical Universal Router and Chainlink feed addresses; the plan script runs
-   unchanged on a fork with `--fork-url`.
-3. **The launch config still has placeholders** (Safe, controller, developer, ticker, supply, opening
-   tick, initial buy). The plan script refuses to build a real plan until they are filled.
+2. **No launch contract is on mainnet yet.** The only mainnet transaction so far created the
+   project's 2-of-3 Safe. The protected launch has been rehearsed on a local fork
+   of Ethereum mainnet: the real 16-step plan built against the real PoolManager, the canonical
+   Universal Router and the live Chainlink ETH/USD feed. Every step was then sent in nonce order,
+   and all 16 landed at their pinned addresses. A buy through the canonical router afterwards paid
+   the opening tax into its vault. The unit suite runs on a simulated chain 1 with mocks at those
+   addresses.
+3. **The published launch config keeps placeholders** (Safe, controller, developer, ticker, supply,
+   opening tick, initial buy). The real values stay private until launch day; the plan script refuses
+   to build a real plan from the placeholders.
 
 ## The live testnet deployment
 
@@ -86,7 +96,8 @@ protection layer, is live on Sepolia, where a real buy and sell executed through
 platform fee accrued and was claimed (addresses in [REVIEW.md](REVIEW.md)). The protected launch itself
 supports chains 1 and 4663 only, so it is not deployable to Sepolia.
 
-No mainnet transaction has been sent, and none will be without explicit approval.
+Apart from creating the Safe, no mainnet transaction has been sent, and none will be without explicit
+approval.
 
 ## Licence
 

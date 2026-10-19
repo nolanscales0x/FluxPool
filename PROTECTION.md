@@ -109,8 +109,12 @@ code-hash checks run unchanged.
 
 ## 6. Still open, stated plainly
 
-- **Mainnet-fork run.** The suite above is local (simulated chain 1). The same plan runs on a mainnet
-  fork with `--fork-url`; we have not attached its output yet.
+- **Mainnet-fork rehearsal: done.**
+  - The plan was built with `forge script script/FluxPlan.s.sol --fork-url` against an Ethereum mainnet fork (real PoolManager, canonical Universal Router, live Chainlink ETH/USD), and each of the 16 steps was sent from the controller in nonce order. All 16 landed at their pinned addresses.
+  - A buy through the canonical router afterwards honoured the opening tax, the 2% budget and the vaults.
+  - The rehearsal found one bug, now fixed. The launch step's gas limit had been sized from the gas it uses. The shell's core-gas reservation needs more, so `LaunchProtected` reverted (`InsufficientGasForCore`).
+  - The planner now sizes every step by the least gas it succeeds with, and `test_everyStepLandsWithinItsOwnGasLimit` replays each step on exactly that limit.
+  - Operational note: the launcher refuses a Chainlink answer older than 1 h. Mainnet ETH/USD updates hourly, so the launch step should be signed soon after an update.
 - **Placeholders in `deploy/fluxpool-token.config.json`** — Safe, controller, developer, ticker, supply,
   opening tick, initial buy. The plan script refuses to build a real plan while any remain.
 - **The exact request ID** will be sent with this package.
