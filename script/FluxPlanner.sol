@@ -105,6 +105,10 @@ abstract contract FluxPlanner is CommonBase, StdUtils {
         bytes data; // initcode for a creation, calldata otherwise
         address expected; // the contract a creation (or the CREATE2 call) must produce
         uint256 gasUsed; // filled by _simulate
+        // The least execution gas the step succeeds with, found by search in _simulate. It can exceed
+        // gasUsed: the shell refuses a swap unless enough gas is left to give the core its full allowance
+        // (`InsufficientGasForCore`), gas a successful swap reserves but never spends.
+        uint256 gasNeeded;
     }
 
     // ---------------------------------------------------------------------
@@ -194,7 +198,8 @@ abstract contract FluxPlanner is CommonBase, StdUtils {
             value: 0,
             data: abi.encodeCall(FluxDeployer.deploy, (a.shellSalt, _shellInitcode(c, a))),
             expected: a.shell,
-            gasUsed: 0
+            gasUsed: 0,
+            gasNeeded: 0
         });
         s[8] = _create(
             c,
@@ -241,7 +246,8 @@ abstract contract FluxPlanner is CommonBase, StdUtils {
             value: c.initialBuyEth,
             data: abi.encodeCall(FluxLauncher.launchProtected, (_launchArgs(c, a))),
             expected: address(0),
-            gasUsed: 0
+            gasUsed: 0,
+            gasNeeded: 0
         });
     }
 
@@ -363,7 +369,8 @@ abstract contract FluxPlanner is CommonBase, StdUtils {
             value: 0,
             data: initcode,
             expected: expected,
-            gasUsed: 0
+            gasUsed: 0,
+            gasNeeded: 0
         });
     }
 
@@ -378,6 +385,7 @@ abstract contract FluxPlanner is CommonBase, StdUtils {
     function _simulate(Config memory c, Step[] memory s) internal {
         vm.deal(c.controller, c.controller.balance + c.initialBuyEth + 1 ether);
         for (uint256 i; i < s.length; i++) {
+            if (s[i].to != address(0)) s[i].gasNeeded = _leastGas(c, s[i]);
             vm.setNonce(c.controller, s[i].nonce);
             uint256 g = gasleft();
             address made;
@@ -395,12 +403,37 @@ abstract contract FluxPlanner is CommonBase, StdUtils {
                 if (s[i].expected != address(0)) made = abi.decode(ret, (address));
             }
             s[i].gasUsed = g - gasleft();
+            if (s[i].to == address(0)) s[i].gasNeeded = s[i].gasUsed;
             if (s[i].expected != address(0)) require(made == s[i].expected, string.concat("address drift: ", s[i].id));
         }
     }
 
-    /// @notice Per-step gas limit: execution measured in simulation plus intrinsic and calldata gas,
-    /// with a 20% margin. Confirm each limit with eth_estimateGas on a mainnet fork before binding the plan.
+    /// @dev The least gas a call step succeeds with, by binary search on a snapshot that is rolled back
+    /// after every try, so the plan's state is untouched.
+    function _leastGas(Config memory c, Step memory s) internal returns (uint256) {
+        uint256 snap = vm.snapshotState();
+        uint256 lo = 21_000;
+        uint256 hi = 30_000_000;
+        require(_tryCall(c, s, hi, snap), string.concat("call failed: ", s.id));
+        while (lo < hi) {
+            uint256 mid = (lo + hi) / 2;
+            if (_tryCall(c, s, mid, snap)) hi = mid;
+            else lo = mid + 1;
+        }
+        vm.revertToStateAndDelete(snap);
+        return hi;
+    }
+
+    function _tryCall(Config memory c, Step memory s, uint256 gas, uint256 snap) internal returns (bool ok) {
+        vm.setNonce(c.controller, s.nonce);
+        vm.prank(c.controller);
+        (ok,) = s.to.call{value: s.value, gas: gas}(s.data);
+        vm.revertToState(snap);
+    }
+
+    /// @notice Per-step gas limit: the least execution gas the step succeeds with in simulation (never less
+    /// than what it used) plus intrinsic and calldata gas, with a 20% margin. Confirm each limit on a
+    /// mainnet fork before binding the plan.
     function _gasLimit(Step memory s) internal pure returns (uint256) {
         uint256 calldataGas;
         bytes memory d = s.data;
@@ -408,7 +441,8 @@ abstract contract FluxPlanner is CommonBase, StdUtils {
             calldataGas += d[i] == 0 ? 4 : 16;
         }
         uint256 intrinsic = 21_000 + calldataGas + (s.to == address(0) ? 32_000 + 2 * ((d.length + 31) / 32) : 0);
-        return (s.gasUsed + intrinsic) * 12 / 10;
+        uint256 exec = s.gasNeeded > s.gasUsed ? s.gasNeeded : s.gasUsed;
+        return (exec + intrinsic) * 12 / 10;
     }
 
     function _totalGas(Step[] memory s) internal pure returns (uint256 total) {

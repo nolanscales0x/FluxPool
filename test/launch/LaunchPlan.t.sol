@@ -87,7 +87,39 @@ contract LaunchPlanTest is Deployers, FluxPlanner {
         _simulate(c, s);
         for (uint256 i; i < s.length; i++) {
             steps[i].gasUsed = s[i].gasUsed;
+            steps[i].gasNeeded = s[i].gasNeeded;
         }
+    }
+
+    /// @dev Every step, replayed with no more execution gas than its own limit allows, still lands. The
+    /// launch is the case that matters: the shell refuses the initial buy unless the core's full gas
+    /// allowance is still available (`InsufficientGasForCore`), so it needs more gas than it spends, and
+    /// a limit sized from gas used alone reverts on chain. That happened on a mainnet-fork rehearsal.
+    function test_everyStepLandsWithinItsOwnGasLimit() public {
+        uint256 snap = vm.snapshotState();
+        _run();
+        Step[] memory s = steps;
+        vm.revertToState(snap);
+        vm.deal(c.controller, c.initialBuyEth + 1 ether);
+        bool sawReserve;
+        for (uint256 i; i < s.length; i++) {
+            assertLe(s[i].gasNeeded, _gasLimit(s[i]), "limit below the gas the step needs");
+            vm.setNonce(c.controller, s[i].nonce);
+            vm.prank(c.controller);
+            if (s[i].to == address(0)) {
+                bytes memory code = s[i].data;
+                address made;
+                assembly ("memory-safe") {
+                    made := create(0, add(code, 0x20), mload(code))
+                }
+                assertEq(made, s[i].expected, s[i].id);
+            } else {
+                (bool ok,) = s[i].to.call{value: s[i].value, gas: s[i].gasNeeded}(s[i].data);
+                assertTrue(ok, s[i].id);
+            }
+            if (s[i].gasNeeded > s[i].gasUsed + 100_000) sawReserve = true;
+        }
+        assertTrue(sawReserve, "the launch reserves the core's gas beyond what it spends");
     }
 
     function test_everyStepLandsWherePredicted() public {

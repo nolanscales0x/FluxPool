@@ -26,7 +26,8 @@ contract FluxPlanScript is Script, FluxPlanner {
 
     function run() external {
         bool dryRun = vm.envOr("DRY_RUN", false);
-        Config memory c = _load(vm.readFile(CONFIG));
+        // PLAN_CONFIG / PLAN_OUT point a rehearsal at its own files (for example a local mainnet fork).
+        Config memory c = _load(vm.readFile(vm.envOr("PLAN_CONFIG", string(CONFIG))));
         if (dryRun) _dryRunChain(c);
         // The canonical router and feed are fixed by the policy; their code hashes are read from the chain.
         if (c.routerCodeHash == bytes32(0)) c.routerCodeHash = c.router.codehash;
@@ -139,6 +140,7 @@ contract FluxPlanScript is Script, FluxPlanner {
             vm.serializeUint(k, "value", s[i].value);
             vm.serializeAddress(k, "expectedAddress", s[i].expected);
             vm.serializeUint(k, "gasUsed", s[i].gasUsed);
+            vm.serializeUint(k, "gasNeeded", s[i].gasNeeded);
             vm.serializeUint(k, "gasLimit", _gasLimit(s[i]));
             string memory obj = vm.serializeBytes(k, "data", s[i].data);
             last = vm.serializeString(steps, vm.toString(i), obj);
@@ -158,6 +160,6 @@ contract FluxPlanScript is Script, FluxPlanner {
         vm.serializeUint(root, "maxTotalGas", _totalGas(s));
         string memory json = vm.serializeString(root, "steps", last);
         vm.createDir("deploy/out", true);
-        vm.writeJson(json, OUT);
+        vm.writeJson(json, vm.envOr("PLAN_OUT", string(OUT)));
     }
 }
